@@ -52,7 +52,7 @@
 
     // Canvas 2 (Back) Configuration
     const PRINT_WIDTH_2 = 290;
-    const PRINT_TOP_2 = 500;
+    const PRINT_TOP_2 = 510;
 
     // Canvas 3 (Detail) Configuration
     const PRINT_WIDTH_3 = 188;
@@ -60,28 +60,28 @@
     const PRINT_LEFT_3 = 208;
 
     const DRIVERS = [
-      { id: 'george', image: 'drivers/george.webp', color: 'bg-[#00A19B]' },
-      { id: 'kimi', image: 'drivers/kimi.webp', color: 'bg-[#00A19B]' },
-      { id: 'max', image: 'drivers/max.webp', color: 'bg-[#0600EF]' },
-      { id: 'isack', image: 'drivers/isack.webp', color: 'bg-[#0600EF]' },
-      { id: 'charles', image: 'drivers/charles.webp', color: 'bg-[#E80020]' },
-      { id: 'lewis', image: 'drivers/lewis.webp', color: 'bg-[#E80020]' },
-      { id: 'lando', image: 'drivers/lando.webp', color: 'bg-[#FF8000]' },
-      { id: 'oscar', image: 'drivers/oscar.webp', color: 'bg-[#FF8000]' },
-      { id: 'fernando', image: 'drivers/fernando.webp', color: 'bg-[#229971]' },
-      { id: 'lance', image: 'drivers/lance.webp', color: 'bg-[#229971]' },
-      { id: 'alexander', image: 'drivers/alexander.webp', color: 'bg-[#005AFF]' },
-      { id: 'carlos', image: 'drivers/carlos.webp', color: 'bg-[#005AFF]' },
-      { id: 'pierre', image: 'drivers/pierre.webp', color: 'bg-[#FF9BFF]' },
-      { id: 'franco', image: 'drivers/franco.webp', color: 'bg-[#FF9BFF]' },
-      { id: 'esteban', image: 'drivers/esteban.webp', color: 'bg-[#B6BABD]' },
-      { id: 'oliver', image: 'drivers/oliver.webp', color: 'bg-[#B6BABD]' },
-      { id: 'liam', image: 'drivers/liam.webp', color: 'bg-[#6692FF]' },
-      { id: 'arvid', image: 'drivers/arvid.webp', color: 'bg-[#6692FF]' },
-      { id: 'nico', image: 'drivers/nico.webp', color: 'bg-[#00E701]' },
-      { id: 'gabriel', image: 'drivers/gabriel.webp', color: 'bg-[#00E701]' },
-      { id: 'sergio', image: 'drivers/sergio.webp', color: 'bg-[#333333]' },
-      { id: 'valtteri', image: 'drivers/valtteri.webp', color: 'bg-[#333333]' }
+      { id: 'george', image: 'drivers/george.webp', color: 'bg-[#00A19B]', team: 'mercedes' },
+      { id: 'kimi', image: 'drivers/kimi.webp', color: 'bg-[#00A19B]', team: 'mercedes' },
+      { id: 'max', image: 'drivers/max.webp', color: 'bg-[#0600EF]', team: 'redbull' },
+      { id: 'isack', image: 'drivers/isack.webp', color: 'bg-[#0600EF]', team: 'redbull' },
+      { id: 'charles', image: 'drivers/charles.webp', color: 'bg-[#E80020]', team: 'ferrari' },
+      { id: 'lewis', image: 'drivers/lewis.webp', color: 'bg-[#E80020]', team: 'ferrari' },
+      { id: 'lando', image: 'drivers/lando.webp', color: 'bg-[#FF8000]', team: 'mclaren' },
+      { id: 'oscar', image: 'drivers/oscar.webp', color: 'bg-[#FF8000]', team: 'mclaren' },
+      { id: 'fernando', image: 'drivers/fernando.webp', color: 'bg-[#229971]', team: 'aston-martin' },
+      { id: 'lance', image: 'drivers/lance.webp', color: 'bg-[#229971]', team: 'aston-martin' },
+      { id: 'alexander', image: 'drivers/alexander.webp', color: 'bg-[#005AFF]', team: 'williams' },
+      { id: 'carlos', image: 'drivers/carlos.webp', color: 'bg-[#005AFF]', team: 'williams' },
+      { id: 'pierre', image: 'drivers/pierre.webp', color: 'bg-[#FF9BFF]', team: 'alpine' },
+      { id: 'franco', image: 'drivers/franco.webp', color: 'bg-[#FF9BFF]', team: 'alpine' },
+      { id: 'esteban', image: 'drivers/esteban.webp', color: 'bg-[#B6BABD]', team: 'haas' },
+      { id: 'oliver', image: 'drivers/oliver.webp', color: 'bg-[#B6BABD]', team: 'haas' },
+      { id: 'liam', image: 'drivers/liam.webp', color: 'bg-[#6692FF]', team: 'vcarb' },
+      { id: 'arvid', image: 'drivers/arvid.webp', color: 'bg-[#6692FF]', team: 'vcarb' },
+      { id: 'nico', image: 'drivers/nico.webp', color: 'bg-[#00E701]', team: 'sauber' },
+      { id: 'gabriel', image: 'drivers/gabriel.webp', color: 'bg-[#00E701]', team: 'sauber' },
+      { id: 'sergio', image: 'drivers/sergio.webp', color: 'bg-[#333333]', team: 'cadillac' },
+      { id: 'valtteri', image: 'drivers/valtteri.webp', color: 'bg-[#333333]', team: 'cadillac' }
     ];
 
     function App() {
@@ -226,6 +226,38 @@
             ctx.drawImage(imageRef.current, drawX, PRINT_TOP_3, renderWidth, renderHeight);
           }
         }, `mockup-${garmentColor}-detail.png`);
+
+        // --- 4. GENERATE FABRIC CANVAS ---
+        await new Promise(r => setTimeout(r, 300));
+        await exportSingleCanvas(async (ctx) => {
+          const fabricImg = new Image();
+          await new Promise(r => { fabricImg.onload = r; fabricImg.onerror = r; fabricImg.src = `garment-${garmentColor}-fabric.png`; });
+          if (fabricImg.naturalWidth > 0) {
+            ctx.drawImage(fabricImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+          }
+        }, `mockup-${garmentColor}-fabric.png`);
+
+        // --- 5. GENERATE SIZE CHART CANVAS ---
+        await new Promise(r => setTimeout(r, 300));
+        await exportSingleCanvas(async (ctx) => {
+          const sizeImg = new Image();
+          await new Promise(r => { sizeImg.onload = r; sizeImg.onerror = r; sizeImg.src = `size-chart.png`; });
+          if (sizeImg.naturalWidth > 0) {
+            ctx.drawImage(sizeImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+          }
+        }, `mockup-size-chart.png`);
+
+        // --- 6. GENERATE CTA CANVAS (If driver selected) ---
+        if (selectedDriver) {
+          await new Promise(r => setTimeout(r, 300));
+          await exportSingleCanvas(async (ctx) => {
+            const ctaImg = new Image();
+            await new Promise(r => { ctaImg.onload = r; ctaImg.onerror = r; ctaImg.src = `cta-${selectedDriver}.png`; });
+            if (ctaImg.naturalWidth > 0) {
+              ctx.drawImage(ctaImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+            }
+          }, `mockup-${selectedDriver}-cta.png`);
+        }
 
       };
 
@@ -372,6 +404,75 @@
                         className="w-full h-auto drop-shadow-md select-none"
                         draggable={false}
                       />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* --- CANVAS 4 (FABRIC) --- */}
+              <div className="relative shadow-md overflow-hidden flex items-center justify-center bg-white border border-slate-200 shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square rounded-xl snap-center">
+                <div 
+                  style={{
+                    width: `${CANVAS_SIZE}px`,
+                    height: `${CANVAS_SIZE}px`,
+                    transform: `scale(${editorScale})`,
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0
+                  }}
+                >
+                  <img 
+                    src={`garment-${garmentColor}-fabric.png`} 
+                    alt="Fabric Detail" 
+                    className="w-full h-full object-cover pointer-events-none absolute top-0 left-0"
+                  />
+                </div>
+              </div>
+
+              {/* --- CANVAS 5 (SIZE CHART) --- */}
+              <div className="relative shadow-md overflow-hidden flex items-center justify-center bg-white border border-slate-200 shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square rounded-xl snap-center">
+                <div 
+                  style={{
+                    width: `${CANVAS_SIZE}px`,
+                    height: `${CANVAS_SIZE}px`,
+                    transform: `scale(${editorScale})`,
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0
+                  }}
+                >
+                  <img 
+                    src="size-chart.png" 
+                    alt="Size Chart" 
+                    className="w-full h-full object-cover pointer-events-none absolute top-0 left-0"
+                  />
+                </div>
+              </div>
+
+              {/* --- CANVAS 6 (CTA) --- */}
+              <div className="relative shadow-md overflow-hidden flex items-center justify-center bg-white border border-slate-200 shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square rounded-xl snap-center">
+                <div 
+                  style={{
+                    width: `${CANVAS_SIZE}px`,
+                    height: `${CANVAS_SIZE}px`,
+                    transform: `scale(${editorScale})`,
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0
+                  }}
+                >
+                  {selectedDriver ? (
+                    <img 
+                      src={`cta-${selectedDriver}.png`} 
+                      alt="Driver CTA" 
+                      className="w-full h-full object-cover pointer-events-none absolute top-0 left-0"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 border-4 border-dashed border-slate-200">
+                      <span className="text-slate-400 font-medium text-2xl tracking-wide">Select a driver to view CTA</span>
                     </div>
                   )}
                 </div>
