@@ -51,8 +51,13 @@
     const PRINT_TOP_1 = 320;
 
     // Canvas 2 (Back) Configuration
-    const PRINT_WIDTH_2 = 290;
-    const PRINT_TOP_2 = 500;
+    const PRINT_WIDTH_2 = 300;
+    const PRINT_TOP_2 = 600;
+
+    // Canvas 3 (Detail) Configuration
+    const PRINT_WIDTH_3 = 188;
+    const PRINT_TOP_3 = 500;
+    const PRINT_LEFT_3 = 200;
 
     const DRIVERS = [
       { id: 'george', image: 'drivers/george.webp', color: 'bg-[#00A19B]' },
@@ -86,13 +91,9 @@
       const [uploadedImage, setUploadedImage] = useState(null);
       
       const [editorScale, setEditorScale] = useState(1);
-      const [activeSlide, setActiveSlide] = useState(0);
 
       // Refs
       const containerRef = useRef(null);
-      const canvas1Ref = useRef(null);
-      const canvas2Ref = useRef(null);
-      const scrollWrapperRef = useRef(null);
       const fileInputRef = useRef(null);
       const imageRef = useRef(null);
 
@@ -111,35 +112,6 @@
         
         return () => observer.disconnect();
       }, [selectedDriver]); 
-
-      // --- Auto-scroll to Back Canvas when Driver is Selected ---
-      useEffect(() => {
-        if (selectedDriver) {
-          setTimeout(() => scrollToSlide(1), 100);
-        } else {
-          scrollToSlide(0);
-        }
-      }, [selectedDriver]);
-
-      const scrollToSlide = (index) => {
-        setActiveSlide(index);
-        if (index === 0 && canvas1Ref.current) {
-          canvas1Ref.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-        } else if (index === 1 && canvas2Ref.current) {
-          canvas2Ref.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-        }
-      };
-
-      const handleScroll = () => {
-        if (!scrollWrapperRef.current) return;
-        const scrollLeft = scrollWrapperRef.current.scrollLeft;
-        // If scrolled past 150px, assume slide 1 is in view
-        if (scrollLeft > 150 && activeSlide !== 1) {
-          setActiveSlide(1);
-        } else if (scrollLeft <= 150 && activeSlide !== 0) {
-          setActiveSlide(0);
-        }
-      };
 
       // --- Handlers ---
       const handleImageUpload = (e) => {
@@ -233,6 +205,28 @@
             }
           }, `mockup-${garmentColor}-${selectedDriver}-back.png`);
         }
+
+        // --- 3. GENERATE DETAIL CANVAS ---
+        // Short delay before the 3rd canvas download
+        await new Promise(r => setTimeout(r, 300));
+
+        await exportSingleCanvas(async (ctx) => {
+          const garment3Img = new Image();
+          await new Promise(r => { garment3Img.onload = r; garment3Img.onerror = r; garment3Img.src = `garment/garment-${garmentColor}-detail.png`; });
+          if (garment3Img.naturalWidth > 0) {
+            ctx.drawImage(garment3Img, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+          }
+
+          if (uploadedImage && imageRef.current) {
+            const artNaturalWidth = imageRef.current.naturalWidth;
+            const artNaturalHeight = imageRef.current.naturalHeight;
+            const renderWidth = PRINT_WIDTH_3;
+            const renderHeight = (artNaturalHeight / artNaturalWidth) * renderWidth;
+            const drawX = PRINT_LEFT_3;
+            ctx.drawImage(imageRef.current, drawX, PRINT_TOP_3, renderWidth, renderHeight);
+          }
+        }, `mockup-${garmentColor}-detail.png`);
+
       };
 
       const activeDriverObj = DRIVERS.find(d => d.id === selectedDriver);
@@ -243,15 +237,11 @@
           {/* Left Area - Canvas / Preview Carousel (Sticky) */}
           <div className="w-full md:flex-1 relative sticky top-0 z-40 bg-slate-50 border-b border-slate-200 md:border-b-0 md:border-r h-[50dvh] md:h-screen flex items-center justify-center overflow-hidden shadow-sm group">
 
-            <div 
-              ref={scrollWrapperRef}
-              onScroll={handleScroll}
-              className="w-full h-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar items-center px-4 sm:px-8 gap-4 sm:gap-8 justify-start xl:justify-center"
-            >
+            <div className="w-full h-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar items-center px-4 sm:px-8 gap-4 sm:gap-8 justify-start xl:justify-center">
               
               {/* --- CANVAS 1 (FRONT) --- */}
               <div 
-                ref={(el) => { containerRef.current = el; canvas1Ref.current = el; }}
+                ref={(el) => { containerRef.current = el; }}
                 className="relative shadow-md overflow-hidden flex items-center justify-center bg-white border border-slate-200 shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square rounded-xl snap-center"
               >
                 <div 
@@ -301,10 +291,7 @@
               </div>
 
               {/* --- CANVAS 2 (BACK) --- */}
-              <div 
-                ref={canvas2Ref}
-                className="relative shadow-md overflow-hidden flex items-center justify-center bg-white border border-slate-200 shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square rounded-xl snap-center"
-              >
+              <div className="relative shadow-md overflow-hidden flex items-center justify-center bg-white border border-slate-200 shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square rounded-xl snap-center">
                 <div 
                   style={{
                     width: `${CANVAS_SIZE}px`,
@@ -351,12 +338,45 @@
                 </div>
               </div>
 
-            </div>
+              {/* --- CANVAS 3 (DETAIL) --- */}
+              <div className="relative shadow-md overflow-hidden flex items-center justify-center bg-white border border-slate-200 shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square rounded-xl snap-center">
+                <div 
+                  style={{
+                    width: `${CANVAS_SIZE}px`,
+                    height: `${CANVAS_SIZE}px`,
+                    transform: `scale(${editorScale})`,
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0
+                  }}
+                >
+                  <img 
+                    src={`garment/garment-${garmentColor}-detail.png`} 
+                    alt="Garment Detail" 
+                    className="w-full h-full object-cover pointer-events-none absolute top-0 left-0"
+                  />
+                  {uploadedImage && (
+                    <div 
+                      className="absolute"
+                      style={{
+                        left: `${PRINT_LEFT_3}px`,
+                        top: `${PRINT_TOP_3}px`,
+                        width: `${PRINT_WIDTH_3}px`,
+                        zIndex: 10,
+                      }}
+                    >
+                      <img 
+                        src={uploadedImage} 
+                        alt="Artwork Detail" 
+                        className="w-full h-auto drop-shadow-md select-none"
+                        draggable={false}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
 
-            {/* Red Visual Dot Indicator for Carousel (Closer & Smaller) */}
-            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-2 z-50 pointer-events-none">
-              <button onClick={(e) => { e.preventDefault(); scrollToSlide(0); }} className={`w-2 h-2 rounded-full transition-all shadow-sm pointer-events-auto ${activeSlide === 0 ? 'bg-red-500 scale-125' : 'bg-slate-300 hover:bg-slate-400'}`}></button>
-              <button onClick={(e) => { e.preventDefault(); scrollToSlide(1); }} className={`w-2 h-2 rounded-full transition-all shadow-sm pointer-events-auto ${activeSlide === 1 ? 'bg-red-500 scale-125' : 'bg-slate-300 hover:bg-slate-400'}`}></button>
             </div>
           </div>
 
@@ -382,24 +402,24 @@
 
               <hr className="border-slate-200" />
 
-              {/* Section 2: Driver Selection Carousel (Faster Animation / More Popping) */}
-              <div className="flex overflow-x-auto gap-4 pt-2 pb-2 px-1 snap-x hide-scrollbar items-end">
+              {/* Section 2: Driver Selection Carousel (Smaller sizes, faster animation, increased pt-4 padding) */}
+              <div className="flex overflow-x-auto gap-4 pt-4 pb-2 px-1 snap-x hide-scrollbar items-end">
                 {DRIVERS.map(driver => (
                   <button
                     key={driver.id}
                     onClick={() => setSelectedDriver(driver.id)}
-                    className={`relative w-[68px] h-[68px] rounded-full transition-all duration-150 ease-out focus:outline-none shrink-0 snap-center
+                    className={`relative w-[60px] h-[60px] rounded-full transition-all duration-150 ease-out focus:outline-none shrink-0 snap-center
                       ${selectedDriver === driver.id 
                         ? 'opacity-100 scale-[1.15] ring-4 ring-red-500 ring-offset-2 ring-offset-white shadow-[0_0_20px_rgba(239,68,68,0.4)] z-10' 
                         : 'opacity-80 hover:opacity-100 hover:scale-110 hover:-translate-y-1 hover:shadow-[0_0_15px_rgba(0,0,0,0.1)] z-0 hover:z-10'
                       }`}
                   >
                     <div className={`absolute inset-0 rounded-full ${driver.color} shadow-inner`}></div>
-                    <div className="absolute bottom-0 left-0 w-full h-[120%] overflow-hidden rounded-b-[34px] pointer-events-none flex justify-center">
+                    <div className="absolute bottom-0 left-0 w-full h-[120%] overflow-hidden rounded-b-[30px] pointer-events-none flex justify-center">
                       <img 
                         src={driver.image} 
                         alt="" 
-                        className="absolute top-[2%] w-[80px] h-auto object-top drop-shadow-md left-1/2 -translate-x-1/2" 
+                        className="absolute top-[2%] w-[72px] h-auto object-top drop-shadow-md left-1/2 -translate-x-1/2" 
                       />
                     </div>
                   </button>
