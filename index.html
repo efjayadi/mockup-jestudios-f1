@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>JeStudios Mockup</title>
+  <title>T-Shirt Mockup & Artwork Studio</title>
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -124,7 +124,7 @@
       }
       const counts = {};
       samples.forEach(c => { const k = `${Math.floor(c.r/8)},${Math.floor(c.g/8)},${Math.floor(c.b/8)}`; counts[k] = (counts[k]||0)+1; });
-      const topColorKey = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+      const topColorKey = Object.keys(counts).length > 0 ? Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b) : "255,255,255";
       const [bgR, bgG, bgB] = topColorKey.split(',').map(v => v * 8);
       for (let i = 0; i < data.length; i += 4) {
         const d = (Math.abs(data[i]-bgR) + Math.abs(data[i+1]-bgG) + Math.abs(data[i+2]-bgB)) / 3;
@@ -157,6 +157,7 @@
       const canvasRef = useRef(null);
       const [images, setImages] = useState({ original: null, processed: null });
       const [transform, setTransform] = useState(initialTransform);
+      const [paper, setPaper] = useState(initialPaper);
       const [isProcessing, setIsProcessing] = useState(true);
       const isDragging = useRef(false);
       const lastPos = useRef({ x: 0, y: 0 });
@@ -178,7 +179,7 @@
         const canvas = canvasRef.current;
         if (!canvas || !images.original) return;
         const ctx = canvas.getContext('2d');
-        const target = initialPaper === "A4" ? { w: A4.h, h: A4.w } : { w: A3.w, h: A3.h };
+        const target = paper === "A4" ? { w: A4.h, h: A4.w } : { w: A3.w, h: A3.h };
         canvas.width = target.w; canvas.height = target.h;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.save();
@@ -187,7 +188,7 @@
         const active = isBgRemoved ? images.processed : images.original;
         ctx.drawImage(active, -active.width/2, -active.height/2);
         ctx.restore();
-      }, [images, transform, isBgRemoved, initialPaper]);
+      }, [images, transform, isBgRemoved, paper]);
 
       useEffect(() => { render(); }, [render]);
 
@@ -230,7 +231,18 @@
                   className="max-w-full max-h-[80vh] bg-white studio-canvas-bg"
                   onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={() => isDragging.current = false}
                 />
-                <div className="absolute -top-8 left-0 bg-black text-white text-[8px] px-2 py-0.5 rounded font-black uppercase tracking-widest">{initialPaper} Area</div>
+                
+                <div className="absolute -top-10 left-0 flex bg-white border border-slate-200 p-0.5 rounded-full overflow-hidden">
+                   {['A4', 'A3'].map(size => (
+                     <button 
+                       key={size}
+                       onClick={() => setPaper(size)}
+                       className={`px-4 py-1 text-[8px] font-black uppercase rounded-full transition-colors ${paper === size ? 'bg-black text-white' : 'text-slate-400 hover:text-black'}`}
+                     >
+                       {size}
+                     </button>
+                   ))}
+                </div>
               </div>
             </div>
             
@@ -246,9 +258,9 @@
           <div className="w-full md:w-[380px] bg-white p-6 md:p-8 flex flex-col justify-between border-l border-slate-200 z-40">
             <div className="space-y-6">
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5">
                    <div className="text-blue-500 flex items-center"><Icon path={Paths.Verify} size={22} className="fill-blue-500 stroke-white stroke-[1.5px]"/></div>
-                   <h2 className="font-roboto-bold text-xl tracking-tighter uppercase leading-none">Jestudios</h2>
+                   <h2 className="font-roboto-bold text-xl tracking-tighter leading-none">Jestudios</h2>
                 </div>
                 <button onClick={onCancel} className="p-2 bg-slate-50 rounded-full hover:bg-slate-100 transition-colors"><Icon path={Paths.Close} /></button>
               </div>
@@ -266,7 +278,7 @@
                  </div>
               </div>
             </div>
-            <button onClick={() => onConfirm(transform)} className="w-full py-5 bg-black text-white rounded-xl font-black uppercase tracking-[0.1em] text-xs mt-8 active:scale-95 transition-all">Apply</button>
+            <button onClick={() => onConfirm(transform, paper)} className="w-full py-5 bg-black text-white rounded-xl font-black uppercase tracking-[0.1em] text-xs mt-8 active:scale-95 transition-all">Apply</button>
           </div>
         </div>
       );
@@ -408,7 +420,7 @@ Terima kasih sudah memilih JeStudios`;
           const canvas = document.createElement('canvas');
           canvas.width = CANVAS_SIZE; canvas.height = CANVAS_SIZE;
           const ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = garmentColor === 'white' ? '#f8fafc' : '#f8fafc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
           let src = `garment/garment-${garmentColor}.png`;
           let pos = { l: (CANVAS_SIZE-PRINT_WIDTH_1)/2, t: PRINT_TOP_1, w: PRINT_WIDTH_1 };
@@ -459,7 +471,7 @@ Terima kasih sudah memilih JeStudios`;
         const showArt = uploadedImage && (type === 'front' || (type === 'back' && selectedDriver) || type === 'detail');
 
         return (
-          <div key={type} className="relative bg-white shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square snap-center overflow-hidden border border-slate-100">
+          <div key={type} className="relative bg-transparent shrink-0 w-[calc(100vw-32px)] sm:w-[500px] md:w-[75vh] max-w-[500px] aspect-square snap-center overflow-hidden transition-all duration-300">
             <div style={{ width: CANVAS_SIZE, height: CANVAS_SIZE, transform: `scale(${editorScale})`, transformOrigin: 'top left', position: 'absolute', top: '50%', left: '50%', marginLeft: -(CANVAS_SIZE*editorScale)/2, marginTop: -(CANVAS_SIZE*editorScale)/2 }}>
               <img src={src} className="w-full h-full absolute inset-0 object-cover" />
               {type === 'front' && selectedDriver && (
@@ -485,7 +497,7 @@ Terima kasih sudah memilih JeStudios`;
               )}
             </div>
             {((type === 'back' || type === 'cta') && !selectedDriver) && (
-              <div className="absolute inset-0 bg-[#f8fafc] flex flex-col items-center justify-center px-8">
+              <div className="absolute inset-0 flex flex-col items-center justify-center px-8">
                  <p className="text-4xl md:text-5xl font-black uppercase text-slate-200 tracking-tighter text-center">Select Driver</p>
               </div>
             )}
@@ -495,9 +507,9 @@ Terima kasih sudah memilih JeStudios`;
 
       return (
         <div className="min-h-screen flex flex-col md:flex-row overflow-hidden bg-white">
-          {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} onConfirm={(t) => { setTransform(t); setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
+          {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} onConfirm={(t, p) => { setTransform(t); setPaperSize(p); setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
 
-          <div ref={containerRef} className="w-full md:flex-1 relative sticky top-0 bg-[#f8fafc] h-[48dvh] md:h-screen flex items-center justify-center overflow-hidden border-r border-slate-200 p-4">
+          <div ref={containerRef} className="w-full md:flex-1 relative sticky top-0 bg-[#f8fafc] h-[48dvh] md:h-screen flex items-center justify-center overflow-hidden border-r border-slate-100 p-4">
             <div className="w-full h-full flex overflow-x-auto snap-x hide-scrollbar items-center gap-8 px-4">
               {['front', 'back', 'detail', 'fabric', 'size', 'cta'].map(v => renderView(v))}
             </div>
@@ -513,7 +525,7 @@ Terima kasih sudah memilih JeStudios`;
 
               <div className="flex overflow-x-auto gap-4 py-1 hide-scrollbar items-center">
                 {DRIVERS.map(d => (
-                  <button key={d.id} onClick={() => setSelectedDriver(d.id)} className={`relative w-14 h-14 rounded-full shrink-0 transition-all duration-75 overflow-hidden ${selectedDriver === d.id ? 'ring-4 ring-red-600 opacity-100 z-10' : 'opacity-80 border border-slate-50'}`}>
+                  <button key={d.id} onClick={() => setSelectedDriver(d.id)} className={`relative w-14 h-14 rounded-full shrink-0 transition-all duration-75 overflow-hidden ${selectedDriver === d.id ? 'ring-4 ring-red-600 opacity-100 z-10' : 'opacity-80 border border-slate-100'}`}>
                     <div className={`absolute inset-0 ${d.color}`} />
                     <img src={d.image} className="absolute top-[12%] w-[75px] left-1/2 -translate-x-1/2" />
                   </button>
@@ -523,18 +535,21 @@ Terima kasih sudah memilih JeStudios`;
               <div className="pt-2">
                 <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={handleUpload} />
                 {!rawImage ? (
-                  <button onClick={() => fileInputRef.current.click()} className="w-full h-14 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 flex flex-col items-center justify-center gap-1 group hover:bg-slate-100">
+                  <button onClick={() => fileInputRef.current.click()} className="w-full h-14 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 flex flex-col items-center justify-center gap-1 group hover:bg-slate-100 transition-colors">
                     <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 group-hover:text-black transition-colors">Upload Artwork</span>
                   </button>
                 ) : (
-                  <div className="flex h-14 w-full rounded-xl overflow-hidden border border-slate-200">
-                    <button onClick={() => fileInputRef.current.click()} className="flex-[3.5] flex items-center gap-3 bg-white px-4 border-r border-slate-100">
-                      <p className="text-[9px] font-black uppercase tracking-tight text-slate-800">Replace Image</p>
+                  <div className="flex h-14 w-full rounded-xl overflow-hidden border border-slate-200 shadow-sm bg-white">
+                    <button onClick={() => fileInputRef.current.click()} className="flex-[3.5] flex items-center gap-3 bg-white px-4 border-r border-slate-100 hover:bg-slate-50 transition-colors overflow-hidden">
+                      <div className="w-8 h-8 rounded border border-slate-100 overflow-hidden shrink-0 bg-white">
+                        <img src={uploadedImage} className="w-full h-full object-contain" />
+                      </div>
+                      <p className="text-[9px] font-black uppercase tracking-tight text-slate-800 truncate">Replace Image</p>
                     </button>
-                    <button onClick={toggleAutoFit} className={`w-14 border-r border-slate-100 flex items-center justify-center bg-white transition-colors ${isAutoFit ? 'text-black' : 'text-slate-300'}`} title="Auto Fit">
+                    <button onClick={toggleAutoFit} className={`w-14 border-r border-slate-100 flex items-center justify-center transition-all ${isAutoFit ? 'bg-white text-black' : 'bg-white text-slate-300'}`} title="Auto Fit">
                       <Icon path={Paths.Expand} size={16} />
                     </button>
-                    <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`w-14 border-r border-slate-100 flex items-center justify-center bg-white transition-colors ${isBgRemoved ? 'text-black' : 'text-slate-300'}`} title="Remove Background">
+                    <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`w-14 border-r border-slate-100 flex items-center justify-center transition-all ${isBgRemoved ? 'bg-white text-black' : 'bg-white text-slate-300'}`} title="Remove Background">
                       <Icon path={Paths.Eraser} size={16} />
                     </button>
                     <button onClick={() => setIsStudioOpen(true)} className="w-14 bg-white flex items-center justify-center active:bg-slate-50"><Icon path={Paths.Edit} size={16} className="text-slate-400 hover:text-black transition-colors" /></button>
