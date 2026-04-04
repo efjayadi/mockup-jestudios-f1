@@ -370,7 +370,7 @@
       const [processedImage, setProcessedImage] = useState(null); 
       const [isStudioOpen, setIsStudioOpen] = useState(false);
       const [isBgRemoved, setIsBgRemoved] = useState(false);
-      const [isAutoFit, setIsAutoFit] = useState(false);
+      const [isAutoFit, setIsAutoFit] = useState(true);
       const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
       const [paperSize, setPaperSize] = useState("A4");
       const [editorScale, setEditorScale] = useState(1);
@@ -389,7 +389,7 @@
       const descriptionText = `Bikin Formula 1 lebih populer dari MotoGP.
 Capek nggak sih tiap ngobrol soal F1 sama orang baru, ujung-ujungnya mereka jawab, "Gue sih lebih ngikutin MotoGP."
 bayangin kalau suatu hari lo keluar rumah, terus langsung tahu ada sesama F1 fans cuma dari kaos yang mereka pakai.
-Itu yang kita bangun di JeStudios. 
+Itu yang kita bangun di JeStudios. 
 
 Detail Produk
 • Bahan 100% cotton (24s & 30s)
@@ -500,8 +500,8 @@ Terima kasih sudah memilih JeStudios`;
             const bounds = detectContentBounds(proc);
             const target = (bounds.w > bounds.h) ? { w: A4.h, h: A4.w, name: "A4" } : { w: A3.w, h: A3.h, name: "A3" };
             setPaperSize(target.name);
-            setTransform({ x: target.w / 2, y: target.h / 2, scale: 1 });
-            setIsAutoFit(false);
+            setTransform({ x: target.w / 2, y: target.h / 2, scale: Math.max(target.w / bounds.w, target.h / bounds.h) });
+            setIsAutoFit(true);
             setIsBgRemoved(false);
           };
           img.src = ev.target.result;
