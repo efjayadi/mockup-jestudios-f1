@@ -184,6 +184,8 @@
       Upload: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12",
       Download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
       Expand: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7",
+      FitWidth: "M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4",
+      FitHeight: "M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4",
       Eraser: "M20 20H7L3 16C2 15 2 13 3 12L13 2C14 1 16 1 17 2L21 6C22 7 22 9 21 10L12 19",
       Edit: "M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z",
       Verify: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
@@ -305,6 +307,35 @@
         }
       };
 
+      const handleSnap = (direction) => {
+        const activeImg = isBgRemoved ? images.processed : images.original;
+        if (!activeImg) return;
+        const target = paper === "A4" ? { w: A4.h, h: A4.w } : { w: A3.w, h: A3.h };
+        
+        // Find true bounds to snap visible artwork smoothly regardless of transparent padding
+        const bounds = detectContentBounds(activeImg);
+        
+        const scaledWidth = activeImg.width * transform.scale;
+        const scaledHeight = activeImg.height * transform.scale;
+        
+        const contentLeftOffset = bounds.x * transform.scale;
+        const contentTopOffset = bounds.y * transform.scale;
+        const contentRightOffset = (activeImg.width - (bounds.x + bounds.w)) * transform.scale;
+        const contentBottomOffset = (activeImg.height - (bounds.y + bounds.h)) * transform.scale;
+        
+        setTransform(p => {
+          let newX = p.x;
+          let newY = p.y;
+          
+          if (direction === 'left') newX = (scaledWidth / 2) - contentLeftOffset;
+          if (direction === 'right') newX = target.w - (scaledWidth / 2) + contentRightOffset;
+          if (direction === 'up') newY = (scaledHeight / 2) - contentTopOffset;
+          if (direction === 'down') newY = target.h - (scaledHeight / 2) + contentBottomOffset;
+          
+          return { ...p, x: newX, y: newY };
+        });
+      };
+
       const displayZoom = Math.round((transform.scale / baseScale.current) * 100);
 
       return (
@@ -345,12 +376,12 @@
               <div className="space-y-4">
                  <div className="grid grid-cols-2 gap-3">
                     <div className="flex gap-1.5">
-                       <button onClick={() => setTransform(p => ({...p, x: p.x - 1}))} className="flex-1 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center active:bg-slate-200"><Icon path="M15 18l-6-6 6-6"/></button>
-                       <button onClick={() => setTransform(p => ({...p, x: p.x + 1}))} className="flex-1 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center active:bg-slate-200"><Icon path="M9 18l6-6-6-6"/></button>
+                       <button onClick={() => handleSnap('left')} className="flex-1 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center active:bg-slate-200" title="Snap Left"><Icon path="M15 18l-6-6 6-6"/></button>
+                       <button onClick={() => handleSnap('right')} className="flex-1 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center active:bg-slate-200" title="Snap Right"><Icon path="M9 18l6-6-6-6"/></button>
                     </div>
                     <div className="flex gap-1.5">
-                       <button onClick={() => setTransform(p => ({...p, y: p.y - 1}))} className="flex-1 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center active:bg-slate-200"><Icon path="M18 15l-6-6-6 6"/></button>
-                       <button onClick={() => setTransform(p => ({...p, y: p.y + 1}))} className="flex-1 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center active:bg-slate-200"><Icon path="M18 9l-6 6-6-6"/></button>
+                       <button onClick={() => handleSnap('up')} className="flex-1 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center active:bg-slate-200" title="Snap Top"><Icon path="M18 15l-6-6-6 6"/></button>
+                       <button onClick={() => handleSnap('down')} className="flex-1 h-12 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center active:bg-slate-200" title="Snap Bottom"><Icon path="M18 9l-6 6-6-6"/></button>
                     </div>
                  </div>
               </div>
@@ -369,7 +400,7 @@
       const [processedImage, setProcessedImage] = useState(null); 
       const [isStudioOpen, setIsStudioOpen] = useState(false);
       const [isBgRemoved, setIsBgRemoved] = useState(true);
-      const [isAutoFit, setIsAutoFit] = useState(true);
+      const [fitMode, setFitMode] = useState('width');
       const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
       const [paperSize, setPaperSize] = useState("A4");
       const [editorScale, setEditorScale] = useState(1);
@@ -472,8 +503,14 @@
             const bounds = detectContentBounds(proc);
             const target = (bounds.w > bounds.h) ? { w: A4.h, h: A4.w, name: "A4" } : { w: A3.w, h: A3.h, name: "A3" };
             setPaperSize(target.name);
-            setTransform({ x: target.w / 2, y: target.h / 2, scale: Math.max(target.w / bounds.w, target.h / bounds.h) });
-            setIsAutoFit(true);
+            
+            const scaleW = target.w / bounds.w;
+            const scaleH = target.h / bounds.h;
+            const initialScale = Math.min(scaleW, scaleH);
+            const initialFitMode = scaleW < scaleH ? 'width' : 'height';
+            
+            setTransform({ x: target.w / 2, y: target.h / 2, scale: initialScale });
+            setFitMode(initialFitMode);
             setIsBgRemoved(true);
           };
           img.src = ev.target.result;
@@ -510,17 +547,17 @@
         }
       };
 
-      const toggleAutoFit = () => {
+      const toggleFitMode = () => {
         if (!processedImage) return;
-        const nextState = !isAutoFit;
-        setIsAutoFit(nextState);
+        const nextMode = fitMode === 'width' ? 'height' : 'width';
+        setFitMode(nextMode);
         const target = paperSize === "A4" ? { w: A4.h, h: A4.w } : { w: A3.w, h: A3.h };
-        if (nextState) {
-          const bounds = detectContentBounds(processedImage);
-          setTransform({ x: target.w / 2, y: target.h / 2, scale: Math.max(target.w / bounds.w, target.h / bounds.h) });
-        } else {
-          setTransform({ x: target.w / 2, y: target.h / 2, scale: 1 });
-        }
+        const bounds = detectContentBounds(processedImage);
+        
+        setTransform(p => {
+          const newScale = nextMode === 'width' ? target.w / bounds.w : target.h / bounds.h;
+          return { ...p, x: target.w / 2, y: target.h / 2, scale: newScale };
+        });
       };
 
       const downloadMockup = async (viewsToDownload = VIEWS) => {
@@ -665,8 +702,8 @@
                 </div>
                 <div className="flex h-10 rounded-xl overflow-hidden border border-slate-200 bg-white shrink-0">
                   <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`w-10 border-r border-slate-100 flex items-center justify-center transition-colors ${isBgRemoved ? 'bg-slate-100 text-black' : 'bg-white text-slate-400 hover:text-black'}`} title="Remove BG"><Icon path={Paths.Eraser} size={14} /></button>
-                  <button onClick={toggleAutoFit} className={`w-10 border-r border-slate-100 flex items-center justify-center transition-colors ${isAutoFit ? 'bg-slate-100 text-black' : 'bg-white text-slate-400 hover:text-black'}`} title="Fit"><Icon path={Paths.Expand} size={14} /></button>
-                  <button onClick={() => setIsStudioOpen(true)} className="w-10 bg-white flex items-center justify-center hover:bg-slate-50 text-slate-400 hover:text-black"><Icon path={Paths.Edit} size={14} /></button>
+                  <button onClick={toggleFitMode} className="w-10 border-r border-slate-100 flex items-center justify-center bg-white text-slate-400 hover:text-black hover:bg-slate-50 transition-colors" title={fitMode === 'width' ? 'Fit to Height' : 'Fit to Width'}><Icon path={fitMode === 'width' ? Paths.FitHeight : Paths.FitWidth} size={14} /></button>
+                  <button onClick={() => setIsStudioOpen(true)} className="w-10 bg-white flex items-center justify-center hover:bg-slate-50 text-slate-400 hover:text-black transition-colors"><Icon path={Paths.Edit} size={14} /></button>
                 </div>
               </div>
 
@@ -694,7 +731,7 @@
                         <div className="w-6 h-6 rounded border border-slate-100 overflow-hidden bg-white shrink-0"><img src={uploadedImage} className="w-full h-full object-contain" /></div>
                         <span className="text-[10px] font-black uppercase tracking-wide text-slate-800 whitespace-nowrap">Replace</span>
                       </button>
-                      <button onClick={toggleAutoFit} className={`w-12 border-r border-slate-100 flex items-center justify-center transition-colors ${isAutoFit ? 'bg-slate-100 text-black' : 'bg-white text-slate-400 hover:text-black'}`} title="Auto Fit"><Icon path={Paths.Expand} size={14} /></button>
+                      <button onClick={toggleFitMode} className="w-12 border-r border-slate-100 flex items-center justify-center bg-white text-slate-400 hover:text-black hover:bg-slate-50 transition-colors" title={fitMode === 'width' ? 'Fit to Height' : 'Fit to Width'}><Icon path={fitMode === 'width' ? Paths.FitHeight : Paths.FitWidth} size={14} /></button>
                       <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`w-12 border-r border-slate-100 flex items-center justify-center transition-colors ${isBgRemoved ? 'bg-slate-100 text-black' : 'bg-white text-slate-400 hover:text-black'}`} title="Remove Background"><Icon path={Paths.Eraser} size={14} /></button>
                       <button onClick={() => setIsStudioOpen(true)} className="w-12 bg-white flex items-center justify-center hover:bg-slate-50 text-slate-400 hover:text-black transition-colors"><Icon path={Paths.Edit} size={14} /></button>
                     </div>
