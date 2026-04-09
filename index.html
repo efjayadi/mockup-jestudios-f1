@@ -87,7 +87,7 @@
       return (
         <div className="fixed top-4 left-0 right-0 px-4 z-[9999] flex justify-center pointer-events-none">
           <div className="w-full max-w-sm bg-white/80 backdrop-blur-md border border-white/20 rounded-3xl p-3 flex items-center gap-3 pwa-prompt-animate pointer-events-auto">
-            <div className="w-12 h-12 bg-black rounded-xl flex-shrink-0 flex items-center justify-center overflow-hidden">
+            <div className="w-12 h-12 bg-black rounded-xl flex-shrink-0 flex items-center justify-center overflow-hidden shadow-sm">
                <img src="icon-192.png" alt="App Icon" className="w-10 h-10 object-contain" />
             </div>
             <div className="flex-1 min-w-0"><h3 className="text-slate-900 font-bold text-sm leading-tight truncate">Download this App</h3><p className="text-slate-500 text-[11px] leading-tight truncate">Get JeStudios Mockup tool on your screen</p></div>
@@ -143,8 +143,10 @@
       Plus: "M12 5v14M5 12h14",
       Minus: "M5 12h14",
       Block: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M4.929 4.929l14.142 14.142",
-      FitWidth: "M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4",
-      FitHeight: "M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"
+      SnapLeft: "M15 18l-6-6 6-6",
+      SnapRight: "M9 18l6-6-6-6",
+      SnapUp: "M18 15l-6-6-6 6",
+      SnapDown: "M18 9l-6 6-6-6"
     };
 
     const createProcessedImage = async (img) => {
@@ -171,72 +173,183 @@
 
     function ArtworkStudio({ rawImage, initialTransform, initialPaper, isBgRemoved, isInverted, onConfirm, onCancel }) {
       const canvasRef = useRef(null);
+      const eraserMaskRef = useRef(null); // Offscreen canvas for erasure
       const [images, setImages] = useState({ original: null, processed: null });
       const [transform, setTransform] = useState(initialTransform);
       const [paper, setPaper] = useState(initialPaper);
-      const isDragging = useRef(false); const lastPos = useRef({ x: 0, y: 0 });
-      const startDist = useRef(0); const startScale = useRef(1); const baseScale = useRef(initialTransform.scale);
+      const [isEraserActive, setIsEraserActive] = useState(false);
+      const [brushSize, setBrushSize] = useState(40);
+      
+      const isDrawing = useRef(false);
+      const isDragging = useRef(false);
+      const lastPos = useRef({ x: 0, y: 0 });
+      const startDist = useRef(0);
+      const startScale = useRef(1);
 
-      useEffect(() => { const img = new Image(); img.onload = async () => { const proc = await createProcessedImage(img); setImages({ original: img, processed: proc }); }; img.src = rawImage; }, [rawImage]);
+      useEffect(() => {
+        const img = new Image();
+        img.onload = async () => {
+          const proc = await createProcessedImage(img);
+          setImages({ original: img, processed: proc });
+          
+          // Init eraser mask same size as original image
+          const mask = document.createElement('canvas');
+          mask.width = img.width; mask.height = img.height;
+          eraserMaskRef.current = mask;
+        };
+        img.src = rawImage;
+      }, [rawImage]);
 
       const render = useCallback(() => {
         const canvas = canvasRef.current; if (!canvas || !images.original) return;
-        const ctx = canvas.getContext('2d'); const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
+        const ctx = canvas.getContext('2d'); 
+        const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
         canvas.width = target.w; canvas.height = target.h;
-        ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.save();
-        ctx.translate(transform.x, transform.y); ctx.scale(transform.scale, transform.scale);
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height); 
+        ctx.save();
+        ctx.translate(transform.x, transform.y); 
+        ctx.scale(transform.scale, transform.scale);
+        
         if (isInverted) ctx.filter = 'invert(1)';
-        const active = isBgRemoved ? images.processed : images.original; ctx.drawImage(active, -active.width/2, -active.height/2);
-        if (isInverted) ctx.filter = 'none'; ctx.restore();
+        const active = isBgRemoved ? images.processed : images.original;
+        
+        // Draw image
+        ctx.drawImage(active, -active.width/2, -active.height/2);
+        
+        // Apply erasure mask
+        if (eraserMaskRef.current) {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.drawImage(eraserMaskRef.current, -active.width/2, -active.height/2);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        
+        if (isInverted) ctx.filter = 'none';
+        ctx.restore();
       }, [images, transform, isBgRemoved, isInverted, paper]);
 
       useEffect(() => { render(); }, [render]);
 
-      const handleInteraction = (type, e) => {
-        const rect = canvasRef.current.getBoundingClientRect(); const ratio = canvasRef.current.width / rect.width;
-        if (type === 'start') {
-          if (e.touches && e.touches.length === 2) { startDist.current = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY); startScale.current = transform.scale; }
-          else { isDragging.current = true; lastPos.current = { x: (e.touches ? e.touches[0].pageX : e.clientX), y: (e.touches ? e.touches[0].pageY : e.clientY) }; }
-        } else if (type === 'move' && isDragging.current) {
-          const cx = e.touches ? e.touches[0].pageX : e.clientX; const cy = e.touches ? e.touches[0].pageY : e.clientY;
-          if (e.touches && e.touches.length === 2) { const dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY); setTransform(p => ({ ...p, scale: startScale.current * (dist / startDist.current) })); }
-          else { setTransform(p => ({ ...p, x: p.x + (cx - lastPos.current.x) * ratio, y: p.y + (cy - lastPos.current.y) * ratio })); lastPos.current = { x: cx, y: cy }; }
-        } else if (type === 'end') { isDragging.current = false; }
+      const getCoord = (e) => {
+        const rect = canvasRef.current.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const ratio = canvasRef.current.width / rect.width;
+        
+        // Transform screen coords to image local coords
+        // Image local origin is its center
+        const canvasX = (clientX - rect.left) * ratio;
+        const canvasY = (clientY - rect.top) * ratio;
+        
+        const localX = (canvasX - transform.x) / transform.scale + (images.original.width / 2);
+        const localY = (canvasY - transform.y) / transform.scale + (images.original.height / 2);
+        
+        return { x: clientX, y: clientY, localX, localY, ratio };
       };
 
-      const handleSnap = (direction) => {
-        const activeImg = isBgRemoved ? images.processed : images.original; if (!activeImg) return;
-        const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h }; const bounds = detectContentBounds(activeImg);
-        const sw = activeImg.width * transform.scale; const sh = activeImg.height * transform.scale;
-        setTransform(p => {
-          let nx = p.x, ny = p.y;
-          if (direction === 'left') nx = (sw / 2) - bounds.x * transform.scale;
-          if (direction === 'right') nx = target.w - (sw / 2) + (activeImg.width - (bounds.x + bounds.w)) * transform.scale;
-          if (direction === 'up') ny = (sh / 2) - bounds.y * transform.scale;
-          if (direction === 'down') ny = target.h - (sh / 2) + (activeImg.height - (bounds.y + bounds.h)) * transform.scale;
-          return { ...p, x: nx, y: ny };
-        });
+      const handleInteraction = (type, e) => {
+        if (!canvasRef.current || !images.original) return;
+        const { x, y, localX, localY, ratio } = getCoord(e);
+
+        if (type === 'start') {
+          if (isEraserActive) {
+            isDrawing.current = true;
+            const mCtx = eraserMaskRef.current.getContext('2d');
+            mCtx.beginPath();
+            mCtx.moveTo(localX, localY);
+          } else {
+            if (e.touches && e.touches.length === 2) {
+              startDist.current = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+              startScale.current = transform.scale;
+            } else {
+              isDragging.current = true;
+              lastPos.current = { x, y };
+            }
+          }
+        } else if (type === 'move') {
+          if (isEraserActive && isDrawing.current) {
+            const mCtx = eraserMaskRef.current.getContext('2d');
+            mCtx.lineTo(localX, localY);
+            mCtx.strokeStyle = 'black';
+            mCtx.lineWidth = brushSize / transform.scale; // Brush size relative to image
+            mCtx.lineCap = 'round';
+            mCtx.stroke();
+            render();
+          } else if (isDragging.current) {
+            if (e.touches && e.touches.length === 2) {
+              const dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+              setTransform(p => ({ ...p, scale: startScale.current * (dist / startDist.current) }));
+            } else {
+              setTransform(p => ({ ...p, x: p.x + (x - lastPos.current.x) * ratio, y: p.y + (y - lastPos.current.y) * ratio }));
+              lastPos.current = { x, y };
+            }
+          }
+        } else if (type === 'end') {
+          isDragging.current = false;
+          isDrawing.current = false;
+        }
+      };
+
+      const handleFinalize = () => {
+        // Flatten image with erasure mask
+        const finalCanvas = document.createElement('canvas');
+        finalCanvas.width = images.original.width;
+        finalCanvas.height = images.original.height;
+        const fCtx = finalCanvas.getContext('2d');
+        const active = isBgRemoved ? images.processed : images.original;
+        fCtx.drawImage(active, 0, 0);
+        fCtx.globalCompositeOperation = 'destination-out';
+        fCtx.drawImage(eraserMaskRef.current, 0, 0);
+        
+        onConfirm(transform, paper, finalCanvas.toDataURL());
       };
 
       return (
         <div className="fixed inset-0 z-[100] bg-slate-100 flex flex-col md:flex-row animate-in fade-in duration-150">
-          <div className="flex-1 bg-[#e2e8f0] relative flex items-center justify-center overflow-hidden p-4 md:p-8" onMouseMove={(e) => handleInteraction('move', e)} onMouseUp={() => handleInteraction('end', e)} onMouseLeave={() => handleInteraction('end', e)}>
+          <div className="flex-1 bg-[#e2e8f0] relative flex items-center justify-center overflow-hidden p-4 md:p-8" 
+               onMouseMove={(e) => handleInteraction('move', e)} 
+               onMouseUp={() => handleInteraction('end', e)} 
+               onMouseLeave={() => handleInteraction('end', e)}>
             <div className="relative w-full h-full flex items-center justify-center">
-              <canvas ref={canvasRef} className="max-w-full max-h-full object-contain bg-white studio-canvas-bg cursor-grab active:cursor-grabbing rounded-sm" onTouchStart={(e) => handleInteraction('start', e)} onTouchMove={(e) => handleInteraction('move', e)} onTouchEnd={() => handleInteraction('end', e)} onMouseDown={(e) => handleInteraction('start', e)} />
+              <canvas ref={canvasRef} 
+                      className={`max-w-full max-h-full object-contain bg-white studio-canvas-bg rounded-sm ${isEraserActive ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`} 
+                      onTouchStart={(e) => handleInteraction('start', e)} 
+                      onTouchMove={(e) => handleInteraction('move', e)} 
+                      onTouchEnd={() => handleInteraction('end', e)} 
+                      onMouseDown={(e) => handleInteraction('start', e)} />
             </div>
+            
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/85 backdrop-blur-md px-3 py-2 rounded-xl z-30">
                <button onClick={() => setTransform(p => ({...p, scale: p.scale*0.99}))} className="w-8 h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-lg active:scale-95 transition-colors duration-100"><Icon path={Paths.Minus} size={16}/></button>
                <div className="flex flex-col items-center w-12"><span className="text-white/50 text-[6px] font-black uppercase mb-0.5">Scale</span><input type="number" value={Math.round((transform.scale / baseScale.current) * 100)} onChange={e => setTransform(p => ({...p, scale: (e.target.value/100)*baseScale.current}))} className="w-full bg-transparent text-white text-center font-bold text-xs focus:outline-none" /></div>
                <button onClick={() => setTransform(p => ({...p, scale: p.scale*1.01}))} className="w-8 h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-lg active:scale-95 transition-colors duration-100"><Icon path={Paths.Plus} size={16}/></button>
             </div>
           </div>
+          
           <div className="w-full md:w-[260px] bg-white p-4 flex flex-col justify-between border-l border-slate-200 z-40 relative">
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="flex justify-between items-center pb-2 border-b"><h2 className="font-roboto-bold text-sm text-slate-800 uppercase tracking-tighter">Edit Design</h2><button onClick={onCancel} className="p-1.5 bg-slate-50 rounded-full hover:bg-slate-200 duration-100"><Icon path={Paths.Close} size={14} /></button></div>
-              <div><span className="text-[10px] font-black uppercase text-slate-400 block mb-1.5">Paper</span><div className="flex bg-slate-100 p-1 rounded-lg">{['A4', 'A3'].map(size => (<button key={size} onClick={() => setPaper(size)} className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all duration-100 ${paper === size ? 'bg-white text-black shadow-sm' : 'text-slate-400'}`}>{size}</button>))}</div></div>
-              <div><span className="text-[10px] font-black uppercase text-slate-400 block mb-1.5">Snap</span><div className="grid grid-cols-2 gap-1.5"><div className="flex gap-1"><button onClick={() => handleSnap('left')} className="flex-1 h-9 bg-slate-50 border rounded-lg flex items-center justify-center hover:bg-slate-100"><Icon path="M15 18l-6-6 6-6" size={14}/></button><button onClick={() => handleSnap('right')} className="flex-1 h-9 bg-slate-50 border rounded-lg flex items-center justify-center hover:bg-slate-100"><Icon path="M9 18l6-6-6-6" size={14}/></button></div><div className="flex gap-1"><button onClick={() => handleSnap('up')} className="flex-1 h-9 bg-slate-50 border rounded-lg flex items-center justify-center hover:bg-slate-100"><Icon path="M18 15l-6-6-6 6" size={14}/></button><button onClick={() => handleSnap('down')} className="flex-1 h-9 bg-slate-50 border rounded-lg flex items-center justify-center hover:bg-slate-100"><Icon path="M18 9l-6 6-6-6" size={14}/></button></div></div></div>
+              
+              <div>
+                <span className="text-[10px] font-black uppercase text-slate-400 block mb-2">Paper</span>
+                <div className="flex bg-slate-100 p-1 rounded-lg">{['A4', 'A3'].map(size => (<button key={size} onClick={() => setPaper(size)} className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all duration-100 ${paper === size ? 'bg-white text-black shadow-sm' : 'text-slate-400'}`}>{size}</button>))}</div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                   <span className="text-[10px] font-black uppercase text-slate-400">Eraser Mode</span>
+                   <button onClick={() => setIsEraserActive(!isEraserActive)} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isEraserActive ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path={Paths.Eraser} size={16} /></button>
+                </div>
+                {isEraserActive && (
+                  <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <div className="flex justify-between text-[8px] font-black uppercase text-slate-400"><span>Brush Size</span><span>{brushSize}px</span></div>
+                    <input type="range" min="10" max="150" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-red-500" />
+                  </div>
+                )}
+              </div>
             </div>
-            <button onClick={() => onConfirm(transform, paper)} className="w-full py-3 bg-black text-white rounded-lg font-black uppercase tracking-[0.1em] text-[10px] active:scale-95 duration-100">Apply</button>
+            
+            <button onClick={handleFinalize} className="w-full py-3 bg-black text-white rounded-lg font-black uppercase tracking-[0.1em] text-[10px] active:scale-95 duration-100">Apply Changes</button>
           </div>
         </div>
       );
@@ -277,9 +390,7 @@
       const handleCarouselScroll = (e) => {
         if (!e.target || e.target.clientWidth === 0 || e.target.clientHeight === 0) return;
         const isVert = window.innerWidth < 768;
-        const index = isVert 
-          ? Math.round(e.target.scrollTop / e.target.clientHeight) 
-          : Math.round(e.target.scrollLeft / e.target.clientWidth);
+        const index = isVert ? Math.round(e.target.scrollTop / e.target.clientHeight) : Math.round(e.target.scrollLeft / e.target.clientWidth);
         if (index !== activeIndex && index >= 0 && index < VIEWS.length) setActiveIndex(index);
       };
 
@@ -296,12 +407,8 @@
         if (!e.touches) e.preventDefault();
         const curX = (e.touches ? e.touches[0].pageX : e.pageX) - carouselRef.current.offsetLeft;
         const curY = (e.touches ? e.touches[0].pageY : e.pageY) - carouselRef.current.offsetTop;
-        const isVert = window.innerWidth < 768;
-        if (isVert) {
-          carouselRef.current.scrollTop = grabRef.current.scrollTop - (curY - grabRef.current.startY) * 1.5;
-        } else {
-          carouselRef.current.scrollLeft = grabRef.current.scrollLeft - (curX - grabRef.current.startX) * 1.5;
-        }
+        if (window.innerWidth < 768) { carouselRef.current.scrollTop = grabRef.current.scrollTop - (curY - grabRef.current.startY) * 1.5; } 
+        else { carouselRef.current.scrollLeft = grabRef.current.scrollLeft - (curX - grabRef.current.startX) * 1.5; }
       };
 
       const handleGrabEnd = () => { grabRef.current.isDown = false; };
@@ -337,73 +444,56 @@
         reader.readAsDataURL(file);
       };
 
-      const handleDragEvent = (type, e) => { e.preventDefault(); if (type === 'enter') dragCounter.current++; else if (type === 'leave') dragCounter.current--; else if (type === 'drop') { dragCounter.current = 0; setIsDragOver(false); if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]); return; } setIsDragOver(dragCounter.current > 0); };
+      const handleSnap = (direction) => {
+        if (!processedImage) return;
+        const target = paperSize === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
+        const bounds = detectContentBounds(processedImage);
+        const sw = processedImage.width * transform.scale;
+        const sh = processedImage.height * transform.scale;
+        setTransform(p => {
+          let nx = p.x, ny = p.y;
+          if (direction === 'left') nx = (sw / 2) - bounds.x * transform.scale;
+          if (direction === 'right') nx = target.w - (sw / 2) + (processedImage.width - (bounds.x + bounds.w)) * transform.scale;
+          if (direction === 'up') ny = (sh / 2) - bounds.y * transform.scale;
+          if (direction === 'down') ny = target.h - (sh / 2) + (processedImage.height - (bounds.y + bounds.h)) * transform.scale;
+          return { ...p, x: nx, y: ny };
+        });
+      };
 
       const downloadMockup = async () => {
         for (const type of DOWNLOAD_VIEWS) {
           if (type === 'back' && !selectedDriver) continue;
-          const canvas = document.createElement('canvas');
-          canvas.width = CANVAS_SIZE; canvas.height = CANVAS_SIZE;
-          const ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-          let src = `garment/garment-${garmentColor}.png`;
-          let pos = { l: (CANVAS_SIZE-PRINT_WIDTH_1)/2, t: PRINT_TOP_1, w: PRINT_WIDTH_1 };
-          if (type === 'back') {
-            src = `garment/garment-${garmentColor}-${selectedDriver}.png`;
-            pos = { l: (CANVAS_SIZE-PRINT_WIDTH_2)/2, t: PRINT_TOP_2, w: PRINT_WIDTH_2 };
-          } else if (type === 'detail') {
-            src = `garment/garment-${garmentColor}-detail.png`;
-            pos = { l: PRINT_LEFT_3, t: PRINT_TOP_3, w: PRINT_WIDTH_3 };
-          } else if (type === 'fabric') {
-            src = `garment-${garmentColor}-fabric.png`;
-          } else if (type === 'size') {
-            src = `size-chart.png`;
-          }
-          const gImg = new Image();
-          await new Promise(r => { gImg.onload = r; gImg.onerror = r; gImg.src = src; });
+          const canvas = document.createElement('canvas'); canvas.width = CANVAS_SIZE; canvas.height = CANVAS_SIZE;
+          const ctx = canvas.getContext('2d'); ctx.fillStyle = '#f8fafc'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          let src = `garment/garment-${garmentColor}.png`; let pos = { l: (CANVAS_SIZE-PRINT_WIDTH_1)/2, t: PRINT_TOP_1, w: PRINT_WIDTH_1 };
+          if (type === 'back') { src = `garment/garment-${garmentColor}-${selectedDriver}.png`; pos = { l: (CANVAS_SIZE-PRINT_WIDTH_2)/2, t: PRINT_TOP_2, w: PRINT_WIDTH_2 }; }
+          else if (type === 'detail') { src = `garment/garment-${garmentColor}-detail.png`; pos = { l: PRINT_LEFT_3, t: PRINT_TOP_3, w: PRINT_WIDTH_3 }; }
+          else if (type === 'fabric') { src = `garment-${garmentColor}-fabric.png`; } else if (type === 'size') { src = `size-chart.png`; }
+          const gImg = new Image(); await new Promise(r => { gImg.onload = r; gImg.onerror = r; gImg.src = src; });
           if (gImg.naturalWidth) ctx.drawImage(gImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
           if (type === 'front' && selectedDriver) {
-            const dImg = new Image();
-            await new Promise(r => { dImg.onload = r; dImg.onerror = r; dImg.src = DRIVERS.find(d=>d.id===selectedDriver).image; });
-            if (dImg.naturalWidth) {
-              const dw = 650; const dh = (dImg.naturalHeight/dImg.naturalWidth)*dw;
-              ctx.drawImage(dImg, -85, CANVAS_SIZE - dh - (CANVAS_SIZE * -1.30), dw, dh);
-            }
+            const dImg = new Image(); await new Promise(r => { dImg.onload = r; dImg.onerror = r; dImg.src = DRIVERS.find(d=>d.id===selectedDriver).image; });
+            if (dImg.naturalWidth) { const dw = 650; const dh = (dImg.naturalHeight/dImg.naturalWidth)*dw; ctx.drawImage(dImg, -85, CANVAS_SIZE - dh - (CANVAS_SIZE * -1.30), dw, dh); }
           }
           if (uploadedImage && (type === 'front' || type === 'back' || type === 'detail')) {
-            const aImg = new Image();
-            await new Promise(r => { aImg.onload = r; aImg.src = uploadedImage; });
-            ctx.globalAlpha = 0.9;
-            ctx.globalCompositeOperation = garmentColor === 'white' ? 'multiply' : 'screen';
+            const aImg = new Image(); await new Promise(r => { aImg.onload = r; aImg.src = uploadedImage; });
+            ctx.globalAlpha = 0.9; ctx.globalCompositeOperation = garmentColor === 'white' ? 'multiply' : 'screen';
             ctx.drawImage(aImg, pos.l, pos.t, pos.w, (aImg.naturalHeight/aImg.naturalWidth)*pos.w);
             ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1.0;
           }
-          const link = document.createElement('a');
-          link.download = `Jestudios_${type}_${Date.now()}.png`; link.href = canvas.toDataURL('image/png'); link.click();
+          const link = document.createElement('a'); link.download = `Jestudios_${type}_${Date.now()}.png`; link.href = canvas.toDataURL('image/png'); link.click();
           await new Promise(r => setTimeout(r, 400));
         }
       };
 
-      const renderView = (type, index) => {
+      const handleDragEvent = (type, e) => { e.preventDefault(); if (type === 'enter') dragCounter.current++; else if (type === 'leave') dragCounter.current--; else if (type === 'drop') { dragCounter.current = 0; setIsDragOver(false); if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]); return; } setIsDragOver(dragCounter.current > 0); };
+
+      const renderView = (type) => {
         let src = `garment/garment-${garmentColor}.png`; let pos = { l: (CANVAS_SIZE-PRINT_WIDTH_1)/2, t: PRINT_TOP_1, w: PRINT_WIDTH_1 };
         const wrapperClass = "flex-none w-full md:w-auto h-auto md:h-full md:max-h-[65vh] aspect-square flex items-center justify-center p-2 md:p-4";
-        
-        if (type === 'back' && !selectedDriver) {
-            return (
-              <div key={type} className={wrapperClass}>
-                <div className="canvas-wrapper relative bg-[#f8fafc] w-full h-full flex flex-col items-center justify-center rounded-2xl border border-slate-200">
-                  <span className="text-slate-400 font-medium text-[10px] text-center px-4">Select driver to view back</span>
-                </div>
-              </div>
-            );
-        }
-        if (type === 'back') {
-            src = `garment/garment-${garmentColor}-${selectedDriver}.png`;
-            pos = { l: (CANVAS_SIZE-PRINT_WIDTH_2)/2, t: PRINT_TOP_2, w: PRINT_WIDTH_2 };
-        } else if (type === 'detail') { 
-            src = `garment/garment-${garmentColor}-detail.png`; 
-            pos = { l: PRINT_LEFT_3, t: PRINT_TOP_3, w: PRINT_WIDTH_3 }; 
-        }
+        if (type === 'back' && !selectedDriver) return (<div key={type} className={wrapperClass}><div className="canvas-wrapper relative bg-[#f8fafc] w-full h-full flex flex-col items-center justify-center rounded-2xl border border-slate-200"><span className="text-slate-400 font-medium text-[10px] text-center px-4">Select driver to view back</span></div></div>);
+        if (type === 'back') { src = `garment/garment-${garmentColor}-${selectedDriver}.png`; pos = { l: (CANVAS_SIZE-PRINT_WIDTH_2)/2, t: PRINT_TOP_2, w: PRINT_WIDTH_2 }; }
+        else if (type === 'detail') { src = `garment/garment-${garmentColor}-detail.png`; pos = { l: PRINT_LEFT_3, t: PRINT_TOP_3, w: PRINT_WIDTH_3 }; }
         const showArt = uploadedImage && (type === 'front' || (type === 'back' && selectedDriver) || type === 'detail');
         return (
           <div key={type} className={wrapperClass}>
@@ -422,28 +512,14 @@
         <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden relative" onDragEnter={(e) => handleDragEvent('enter', e)} onDragOver={(e) => e.preventDefault()} onDragLeave={(e) => handleDragEvent('leave', e)} onDrop={(e) => handleDragEvent('drop', e)}>
           {isDragOver && <div className="absolute inset-0 z-[9999] bg-blue-500/10 backdrop-blur-[2px] m-3 border-4 border-dashed border-blue-500 rounded-3xl flex items-center justify-center pointer-events-none transition-all duration-100"><div className="bg-white px-8 py-6 rounded-3xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-100"><div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center"><Icon path={Paths.Upload} size={28} className="text-blue-500" /></div><div className="text-center"><h3 className="font-roboto-bold text-xl text-slate-800">Drop Design</h3><p className="text-slate-500 text-sm mt-1">Release to upload</p></div></div></div>}
           <PWAInstallPrompt />
-          {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} isInverted={isInverted} onConfirm={(t, p) => { setTransform(t); setPaperSize(p); setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
+          {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} isInverted={isInverted} onConfirm={(t, p, newRaw) => { setTransform(t); setPaperSize(p); setRawImage(newRaw); setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
           
           <div className="flex-1 w-full relative flex flex-col items-center justify-center bg-[#f8fafc] overflow-hidden">
-             <div 
-                ref={carouselRef} 
-                onScroll={handleCarouselScroll}
-                onMouseDown={handleGrabStart}
-                onMouseMove={handleGrabMove}
-                onMouseUp={handleGrabEnd}
-                onMouseLeave={handleGrabEnd}
-                onTouchStart={handleGrabStart}
-                onTouchMove={handleGrabMove}
-                onTouchEnd={handleGrabEnd}
-                className="flex flex-col md:flex-row w-full h-full overflow-y-auto md:overflow-y-hidden md:overflow-x-auto hide-scrollbar items-center justify-start cursor-grab active:cursor-grabbing px-4"
-             >
-                {VIEWS.map((v, i) => renderView(v, i))}
+             <div ref={carouselRef} onScroll={handleCarouselScroll} onMouseDown={handleGrabStart} onMouseMove={handleGrabMove} onMouseUp={handleGrabEnd} onMouseLeave={handleGrabEnd} onTouchStart={handleGrabStart} onTouchMove={handleGrabMove} onTouchEnd={handleGrabEnd} className="flex flex-col md:flex-row w-full h-full overflow-y-auto md:overflow-y-hidden md:overflow-x-auto hide-scrollbar items-center justify-start cursor-grab active:cursor-grabbing px-4">
+                {VIEWS.map((v) => renderView(v))}
              </div>
-             
              <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-1.5 z-10 pointer-events-none md:hidden">
-                {VIEWS.map((_, i) => (
-                   <div key={i} className={`h-1 rounded-full transition-all duration-150 ${i === activeIndex ? 'w-4 bg-blue-500' : 'w-1 bg-slate-300'}`} />
-                ))}
+                {VIEWS.map((_, i) => (<div key={i} className={`h-1 rounded-full transition-all duration-150 ${i === activeIndex ? 'w-4 bg-blue-500' : 'w-1 bg-slate-300'}`} />))}
              </div>
           </div>
 
@@ -456,14 +532,19 @@
                    {DRIVERS.map(d => (<button key={d.id} onClick={() => setSelectedDriver(d.id)} className={`relative w-9 h-9 rounded-full shrink-0 transition-all duration-100 overflow-hidden border ${selectedDriver === d.id ? 'border-black scale-110 z-10' : 'opacity-70 border-slate-200'}`}><div className={`absolute inset-0 ${d.color}`} /><img src={d.image} className="absolute top-[10%] w-[40px] left-1/2 -translate-x-1/2" /></button>))}
                 </div>
               </div>
-              <div className="flex items-center gap-2 w-full">
+              <div className="flex items-center gap-2 w-full overflow-x-auto hide-scrollbar">
                 <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => processFile(e.target.files[0])} />
-                <button title="Upload" onClick={() => fileInputRef.current.click()} className="flex-1 h-10 border rounded-xl flex items-center justify-center bg-white hover:bg-slate-50 duration-100 overflow-hidden">{!rawImage ? <Icon path={Paths.Upload} size={16} className="text-slate-600" /> : <img src={uploadedImage} className="w-full h-full object-contain p-1" />}</button>
-                <button onClick={() => { if (!processedImage) return; const next = fitMode === 'width' ? 'height' : 'width'; setFitMode(next); const target = paperSize === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h }; const bounds = detectContentBounds(processedImage); const nS = next === 'width' ? target.w / bounds.w : target.h / bounds.h; setTransform({ x: target.w / 2 - (bounds.x + bounds.w / 2 - processedImage.width / 2) * nS, y: target.h / 2 - (bounds.y + bounds.h / 2 - processedImage.height / 2) * nS, scale: nS }); }} className="flex-1 h-10 border rounded-xl flex items-center justify-center bg-white duration-100" title="Fit Mode"><Icon path={fitMode === 'width' ? Paths.FitHeight : Paths.FitWidth} size={16} /></button>
-                <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex-1 h-10 border rounded-xl flex items-center justify-center duration-100 ${isBgRemoved ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Remove BG"><Icon path={Paths.Eraser} size={16} /></button>
-                <button onClick={() => setIsInverted(!isInverted)} className={`flex-1 h-10 border rounded-xl flex items-center justify-center duration-100 ${isInverted ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Invert Colors"><Icon path={Paths.Invert} size={16} /></button>
-                <button onClick={() => setIsStudioOpen(true)} className="flex-1 h-10 border rounded-xl bg-white flex items-center justify-center duration-100" title="Edit Design"><Icon path={Paths.Edit} size={16} /></button>
-                <button onClick={downloadMockup} className="flex-1 h-10 bg-black text-white rounded-xl flex items-center justify-center active:scale-95 duration-100" title="Download"><Icon path={Paths.Download} size={16} /></button>
+                <button title="Upload" onClick={() => fileInputRef.current.click()} className="flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center bg-white hover:bg-slate-50 duration-100 overflow-hidden">{!rawImage ? <Icon path={Paths.Upload} size={16} className="text-slate-600" /> : <img src={uploadedImage} className="w-full h-full object-contain p-1" />}</button>
+                <div className="flex h-10 border rounded-xl bg-white overflow-hidden">
+                   <button onClick={() => handleSnap('left')} className="w-10 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapLeft} size={14} /></button>
+                   <button onClick={() => handleSnap('right')} className="w-10 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapRight} size={14} /></button>
+                   <button onClick={() => handleSnap('up')} className="w-10 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapUp} size={14} /></button>
+                   <button onClick={() => handleSnap('down')} className="w-10 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.SnapDown} size={14} /></button>
+                </div>
+                <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 ${isBgRemoved ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Remove BG"><Icon path={Paths.Eraser} size={16} /></button>
+                <button onClick={() => setIsInverted(!isInverted)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 ${isInverted ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Invert Colors"><Icon path={Paths.Invert} size={16} /></button>
+                <button onClick={() => setIsStudioOpen(true)} className="flex-1 min-w-[40px] h-10 border rounded-xl bg-white flex items-center justify-center duration-100" title="Edit Design"><Icon path={Paths.Edit} size={16} /></button>
+                <button onClick={downloadMockup} className="flex-1 min-w-[40px] h-10 bg-black text-white rounded-xl flex items-center justify-center active:scale-95 duration-100" title="Download"><Icon path={Paths.Download} size={16} /></button>
               </div>
             </div>
           </div>
