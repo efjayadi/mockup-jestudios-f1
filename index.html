@@ -69,29 +69,57 @@
       useEffect(() => {
         const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
         if (isStandalone) return;
+
         const userAgent = window.navigator.userAgent.toLowerCase();
         const ios = /iphone|ipad|ipod/.test(userAgent);
         setIsIOS(ios);
-        const handlePrompt = (e) => { e.preventDefault(); setDeferredPrompt(e); setIsVisible(true); };
+
+        const handlePrompt = (e) => {
+          e.preventDefault();
+          setDeferredPrompt(e);
+          setIsVisible(true);
+        };
+
         window.addEventListener('beforeinstallprompt', handlePrompt);
-        if (ios) { const timer = setTimeout(() => setIsVisible(true), 2500); return () => clearTimeout(timer); }
+        if (ios) {
+          const timer = setTimeout(() => setIsVisible(true), 2500);
+          return () => clearTimeout(timer);
+        }
         return () => window.removeEventListener('beforeinstallprompt', handlePrompt);
       }, []);
 
       const handleInstall = async () => {
-        if (isIOS) { alert("To install: Tap the 'Share' icon at the bottom of Safari, then select 'Add to Home Screen' from the list."); setIsVisible(false); return; }
-        if (deferredPrompt) { deferredPrompt.prompt(); const { outcome } = await deferredPrompt.userChoice; if (outcome === 'accepted') { setDeferredPrompt(null); setIsVisible(false); } }
+        if (isIOS) {
+          alert("To install: Tap the 'Share' icon at the bottom of Safari, then select 'Add to Home Screen' from the list.");
+          setIsVisible(false);
+          return;
+        }
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          if (outcome === 'accepted') {
+            setDeferredPrompt(null);
+            setIsVisible(false);
+          }
+        }
       };
 
       if (!isVisible) return null;
+
       return (
         <div className="fixed top-4 left-0 right-0 px-4 z-[9999] flex justify-center pointer-events-none">
           <div className="w-full max-w-sm bg-white/80 backdrop-blur-md border border-white/20 rounded-3xl p-3 flex items-center gap-3 pwa-prompt-animate pointer-events-auto">
             <div className="w-12 h-12 bg-black rounded-xl flex-shrink-0 flex items-center justify-center overflow-hidden shadow-sm">
                <img src="icon-192.png" alt="App Icon" className="w-10 h-10 object-contain" />
             </div>
-            <div className="flex-1 min-w-0"><h3 className="text-slate-900 font-bold text-sm leading-tight truncate">Download this App</h3><p className="text-slate-500 text-[11px] leading-tight truncate">Get JeStudios Mockup tool on your screen</p></div>
-            <div className="flex items-center gap-2"><button onClick={handleInstall} className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all duration-100 text-white font-bold text-xs px-4 py-1.5 rounded-full uppercase tracking-tight">Get</button><button onClick={() => setIsVisible(false)} className="text-slate-400 hover:text-slate-600 transition-colors duration-100 p-1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg></button></div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-slate-900 font-bold text-sm leading-tight truncate">Download this App</h3>
+              <p className="text-slate-500 text-[11px] leading-tight truncate">Get JeStudios Mockup tool on your screen</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={handleInstall} className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all duration-100 text-white font-bold text-xs px-4 py-1.5 rounded-full uppercase tracking-tight">Get</button>
+              <button onClick={() => setIsVisible(false)} className="text-slate-400 hover:text-slate-600 transition-colors duration-100 p-1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
+            </div>
           </div>
         </div>
       );
@@ -173,7 +201,7 @@
 
     function ArtworkStudio({ rawImage, initialTransform, initialPaper, isBgRemoved, isInverted, onConfirm, onCancel }) {
       const canvasRef = useRef(null);
-      const eraserMaskRef = useRef(null); // Offscreen canvas for erasure
+      const eraserMaskRef = useRef(null); 
       const [images, setImages] = useState({ original: null, processed: null });
       const [transform, setTransform] = useState(initialTransform);
       const [paper, setPaper] = useState(initialPaper);
@@ -185,14 +213,13 @@
       const lastPos = useRef({ x: 0, y: 0 });
       const startDist = useRef(0);
       const startScale = useRef(1);
+      const baseScale = useRef(initialTransform.scale);
 
       useEffect(() => {
         const img = new Image();
         img.onload = async () => {
           const proc = await createProcessedImage(img);
           setImages({ original: img, processed: proc });
-          
-          // Init eraser mask same size as original image
           const mask = document.createElement('canvas');
           mask.width = img.width; mask.height = img.height;
           eraserMaskRef.current = mask;
@@ -205,25 +232,18 @@
         const ctx = canvas.getContext('2d'); 
         const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
         canvas.width = target.w; canvas.height = target.h;
-        
         ctx.clearRect(0, 0, canvas.width, canvas.height); 
         ctx.save();
         ctx.translate(transform.x, transform.y); 
         ctx.scale(transform.scale, transform.scale);
-        
         if (isInverted) ctx.filter = 'invert(1)';
         const active = isBgRemoved ? images.processed : images.original;
-        
-        // Draw image
         ctx.drawImage(active, -active.width/2, -active.height/2);
-        
-        // Apply erasure mask
         if (eraserMaskRef.current) {
           ctx.globalCompositeOperation = 'destination-out';
           ctx.drawImage(eraserMaskRef.current, -active.width/2, -active.height/2);
           ctx.globalCompositeOperation = 'source-over';
         }
-        
         if (isInverted) ctx.filter = 'none';
         ctx.restore();
       }, [images, transform, isBgRemoved, isInverted, paper]);
@@ -231,24 +251,27 @@
       useEffect(() => { render(); }, [render]);
 
       const getCoord = (e) => {
+        if (!e) return { x: 0, y: 0, localX: 0, localY: 0, ratio: 1 };
         const rect = canvasRef.current.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         const ratio = canvasRef.current.width / rect.width;
-        
-        // Transform screen coords to image local coords
-        // Image local origin is its center
         const canvasX = (clientX - rect.left) * ratio;
         const canvasY = (clientY - rect.top) * ratio;
-        
         const localX = (canvasX - transform.x) / transform.scale + (images.original.width / 2);
         const localY = (canvasY - transform.y) / transform.scale + (images.original.height / 2);
-        
         return { x: clientX, y: clientY, localX, localY, ratio };
       };
 
       const handleInteraction = (type, e) => {
         if (!canvasRef.current || !images.original) return;
+        
+        if (type === 'end') {
+          isDragging.current = false;
+          isDrawing.current = false;
+          return;
+        }
+
         const { x, y, localX, localY, ratio } = getCoord(e);
 
         if (type === 'start') {
@@ -271,7 +294,7 @@
             const mCtx = eraserMaskRef.current.getContext('2d');
             mCtx.lineTo(localX, localY);
             mCtx.strokeStyle = 'black';
-            mCtx.lineWidth = brushSize / transform.scale; // Brush size relative to image
+            mCtx.lineWidth = brushSize / transform.scale;
             mCtx.lineCap = 'round';
             mCtx.stroke();
             render();
@@ -284,14 +307,10 @@
               lastPos.current = { x, y };
             }
           }
-        } else if (type === 'end') {
-          isDragging.current = false;
-          isDrawing.current = false;
         }
       };
 
       const handleFinalize = () => {
-        // Flatten image with erasure mask
         const finalCanvas = document.createElement('canvas');
         finalCanvas.width = images.original.width;
         finalCanvas.height = images.original.height;
@@ -300,7 +319,6 @@
         fCtx.drawImage(active, 0, 0);
         fCtx.globalCompositeOperation = 'destination-out';
         fCtx.drawImage(eraserMaskRef.current, 0, 0);
-        
         onConfirm(transform, paper, finalCanvas.toDataURL());
       };
 
@@ -308,14 +326,14 @@
         <div className="fixed inset-0 z-[100] bg-slate-100 flex flex-col md:flex-row animate-in fade-in duration-150">
           <div className="flex-1 bg-[#e2e8f0] relative flex items-center justify-center overflow-hidden p-4 md:p-8" 
                onMouseMove={(e) => handleInteraction('move', e)} 
-               onMouseUp={() => handleInteraction('end', e)} 
-               onMouseLeave={() => handleInteraction('end', e)}>
+               onMouseUp={(e) => handleInteraction('end', e)} 
+               onMouseLeave={(e) => handleInteraction('end', e)}>
             <div className="relative w-full h-full flex items-center justify-center">
               <canvas ref={canvasRef} 
                       className={`max-w-full max-h-full object-contain bg-white studio-canvas-bg rounded-sm ${isEraserActive ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`} 
                       onTouchStart={(e) => handleInteraction('start', e)} 
                       onTouchMove={(e) => handleInteraction('move', e)} 
-                      onTouchEnd={() => handleInteraction('end', e)} 
+                      onTouchEnd={(e) => handleInteraction('end', e)} 
                       onMouseDown={(e) => handleInteraction('start', e)} />
             </div>
             
@@ -329,12 +347,10 @@
           <div className="w-full md:w-[260px] bg-white p-4 flex flex-col justify-between border-l border-slate-200 z-40 relative">
             <div className="space-y-6">
               <div className="flex justify-between items-center pb-2 border-b"><h2 className="font-roboto-bold text-sm text-slate-800 uppercase tracking-tighter">Edit Design</h2><button onClick={onCancel} className="p-1.5 bg-slate-50 rounded-full hover:bg-slate-200 duration-100"><Icon path={Paths.Close} size={14} /></button></div>
-              
               <div>
                 <span className="text-[10px] font-black uppercase text-slate-400 block mb-2">Paper</span>
                 <div className="flex bg-slate-100 p-1 rounded-lg">{['A4', 'A3'].map(size => (<button key={size} onClick={() => setPaper(size)} className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all duration-100 ${paper === size ? 'bg-white text-black shadow-sm' : 'text-slate-400'}`}>{size}</button>))}</div>
               </div>
-
               <div>
                 <div className="flex justify-between items-center mb-2">
                    <span className="text-[10px] font-black uppercase text-slate-400">Eraser Mode</span>
@@ -348,8 +364,7 @@
                 )}
               </div>
             </div>
-            
-            <button onClick={handleFinalize} className="w-full py-3 bg-black text-white rounded-lg font-black uppercase tracking-[0.1em] text-[10px] active:scale-95 duration-100">Apply Changes</button>
+            <button onClick={handleFinalize} className="w-full py-3 bg-black text-white rounded-lg font-black uppercase tracking-[0.1em] text-[10px] active:scale-95 transition-all duration-100">Apply Changes</button>
           </div>
         </div>
       );
@@ -445,19 +460,25 @@
       };
 
       const handleSnap = (direction) => {
-        if (!processedImage) return;
-        const target = paperSize === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
-        const bounds = detectContentBounds(processedImage);
-        const sw = processedImage.width * transform.scale;
-        const sh = processedImage.height * transform.scale;
-        setTransform(p => {
-          let nx = p.x, ny = p.y;
-          if (direction === 'left') nx = (sw / 2) - bounds.x * transform.scale;
-          if (direction === 'right') nx = target.w - (sw / 2) + (processedImage.width - (bounds.x + bounds.w)) * transform.scale;
-          if (direction === 'up') ny = (sh / 2) - bounds.y * transform.scale;
-          if (direction === 'down') ny = target.h - (sh / 2) + (processedImage.height - (bounds.y + bounds.h)) * transform.scale;
-          return { ...p, x: nx, y: ny };
-        });
+        const activeImg = isBgRemoved ? processedImage : null;
+        const imgRef = activeImg || (rawImage ? new Image() : null);
+        if (!imgRef) return;
+        const applySnap = (readyImg) => {
+          const target = paperSize === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
+          const bounds = detectContentBounds(readyImg);
+          const sw = readyImg.width * transform.scale;
+          const sh = readyImg.height * transform.scale;
+          setTransform(p => {
+            let nx = p.x, ny = p.y;
+            if (direction === 'left') nx = (sw / 2) - bounds.x * transform.scale;
+            if (direction === 'right') nx = target.w - (sw / 2) + (readyImg.width - (bounds.x + bounds.w)) * transform.scale;
+            if (direction === 'up') ny = (sh / 2) - bounds.y * transform.scale;
+            if (direction === 'down') ny = target.h - (sh / 2) + (readyImg.height - (bounds.y + bounds.h)) * transform.scale;
+            return { ...p, x: nx, y: ny };
+          });
+        };
+        if (activeImg) { applySnap(activeImg); } 
+        else if (rawImage) { const tempImg = new Image(); tempImg.onload = () => applySnap(tempImg); tempImg.src = rawImage; }
       };
 
       const downloadMockup = async () => {
