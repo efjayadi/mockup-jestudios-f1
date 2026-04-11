@@ -53,6 +53,9 @@
     .pwa-prompt-animate {
       animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
+    
+    /* Ensure touch-action is none to allow custom touch handling on canvas */
+    .touch-none { touch-action: none; }
   </style>
 </head>
 <body class="antialiased overflow-hidden">
@@ -69,57 +72,29 @@
       useEffect(() => {
         const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
         if (isStandalone) return;
-
         const userAgent = window.navigator.userAgent.toLowerCase();
         const ios = /iphone|ipad|ipod/.test(userAgent);
         setIsIOS(ios);
-
-        const handlePrompt = (e) => {
-          e.preventDefault();
-          setDeferredPrompt(e);
-          setIsVisible(true);
-        };
-
+        const handlePrompt = (e) => { e.preventDefault(); setDeferredPrompt(e); setIsVisible(true); };
         window.addEventListener('beforeinstallprompt', handlePrompt);
-        if (ios) {
-          const timer = setTimeout(() => setIsVisible(true), 2500);
-          return () => clearTimeout(timer);
-        }
+        if (ios) { const timer = setTimeout(() => setIsVisible(true), 2500); return () => clearTimeout(timer); }
         return () => window.removeEventListener('beforeinstallprompt', handlePrompt);
       }, []);
 
       const handleInstall = async () => {
-        if (isIOS) {
-          alert("To install: Tap the 'Share' icon at the bottom of Safari, then select 'Add to Home Screen' from the list.");
-          setIsVisible(false);
-          return;
-        }
-        if (deferredPrompt) {
-          deferredPrompt.prompt();
-          const { outcome } = await deferredPrompt.userChoice;
-          if (outcome === 'accepted') {
-            setDeferredPrompt(null);
-            setIsVisible(false);
-          }
-        }
+        if (isIOS) { alert("To install: Tap the 'Share' icon at the bottom of Safari, then select 'Add to Home Screen' from the list."); setIsVisible(false); return; }
+        if (deferredPrompt) { deferredPrompt.prompt(); const { outcome } = await deferredPrompt.userChoice; if (outcome === 'accepted') { setDeferredPrompt(null); setIsVisible(false); } }
       };
 
       if (!isVisible) return null;
-
       return (
         <div className="fixed top-4 left-0 right-0 px-4 z-[9999] flex justify-center pointer-events-none">
           <div className="w-full max-w-sm bg-white/80 backdrop-blur-md border border-white/20 rounded-3xl p-3 flex items-center gap-3 pwa-prompt-animate pointer-events-auto">
             <div className="w-12 h-12 bg-black rounded-xl flex-shrink-0 flex items-center justify-center overflow-hidden shadow-sm">
                <img src="icon-192.png" alt="App Icon" className="w-10 h-10 object-contain" />
             </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-slate-900 font-bold text-sm leading-tight truncate">Download this App</h3>
-              <p className="text-slate-500 text-[11px] leading-tight truncate">Get JeStudios Mockup tool on your screen</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={handleInstall} className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all duration-100 text-white font-bold text-xs px-4 py-1.5 rounded-full uppercase tracking-tight">Get</button>
-              <button onClick={() => setIsVisible(false)} className="text-slate-400 hover:text-slate-600 transition-colors duration-100 p-1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
-            </div>
+            <div className="flex-1 min-w-0"><h3 className="text-slate-900 font-bold text-sm leading-tight truncate">Download this App</h3><p className="text-slate-500 text-[11px] leading-tight truncate">Get JeStudios Mockup tool on your screen</p></div>
+            <div className="flex items-center gap-2"><button onClick={handleInstall} className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all duration-100 text-white font-bold text-xs px-4 py-1.5 rounded-full uppercase tracking-tight">Get</button><button onClick={() => setIsVisible(false)} className="text-slate-400 hover:text-slate-600 transition-colors duration-100 p-1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg></button></div>
           </div>
         </div>
       );
@@ -232,18 +207,23 @@
         const ctx = canvas.getContext('2d'); 
         const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
         canvas.width = target.w; canvas.height = target.h;
+        
         ctx.clearRect(0, 0, canvas.width, canvas.height); 
         ctx.save();
         ctx.translate(transform.x, transform.y); 
         ctx.scale(transform.scale, transform.scale);
+        
         if (isInverted) ctx.filter = 'invert(1)';
         const active = isBgRemoved ? images.processed : images.original;
+        
         ctx.drawImage(active, -active.width/2, -active.height/2);
+        
         if (eraserMaskRef.current) {
           ctx.globalCompositeOperation = 'destination-out';
           ctx.drawImage(eraserMaskRef.current, -active.width/2, -active.height/2);
           ctx.globalCompositeOperation = 'source-over';
         }
+        
         if (isInverted) ctx.filter = 'none';
         ctx.restore();
       }, [images, transform, isBgRemoved, isInverted, paper]);
@@ -256,16 +236,23 @@
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         const ratio = canvasRef.current.width / rect.width;
+        
         const canvasX = (clientX - rect.left) * ratio;
         const canvasY = (clientY - rect.top) * ratio;
+        
         const localX = (canvasX - transform.x) / transform.scale + (images.original.width / 2);
         const localY = (canvasY - transform.y) / transform.scale + (images.original.height / 2);
+        
         return { x: clientX, y: clientY, localX, localY, ratio };
       };
 
       const handleInteraction = (type, e) => {
         if (!canvasRef.current || !images.original) return;
         
+        // Critical for preventing ghost scrolls and browser navigation
+        if (e.cancelable) e.preventDefault();
+        if (e.stopPropagation) e.stopPropagation();
+
         if (type === 'end') {
           isDragging.current = false;
           isDrawing.current = false;
@@ -323,17 +310,17 @@
       };
 
       return (
-        <div className="fixed inset-0 z-[100] bg-slate-100 flex flex-col md:flex-row animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] bg-slate-100 flex flex-col md:flex-row animate-in fade-in duration-150 touch-none">
           <div className="flex-1 bg-[#e2e8f0] relative flex items-center justify-center overflow-hidden p-4 md:p-8" 
                onMouseMove={(e) => handleInteraction('move', e)} 
                onMouseUp={(e) => handleInteraction('end', e)} 
-               onMouseLeave={(e) => handleInteraction('end', e)}>
+               onMouseLeave={(e) => handleInteraction('end', e)}
+               onTouchMove={(e) => handleInteraction('move', e)}
+               onTouchEnd={(e) => handleInteraction('end', e)}>
             <div className="relative w-full h-full flex items-center justify-center">
               <canvas ref={canvasRef} 
-                      className={`max-w-full max-h-full object-contain bg-white studio-canvas-bg rounded-sm ${isEraserActive ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`} 
+                      className={`max-w-full max-h-full object-contain bg-white studio-canvas-bg rounded-sm touch-none ${isEraserActive ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`} 
                       onTouchStart={(e) => handleInteraction('start', e)} 
-                      onTouchMove={(e) => handleInteraction('move', e)} 
-                      onTouchEnd={(e) => handleInteraction('end', e)} 
                       onMouseDown={(e) => handleInteraction('start', e)} />
             </div>
             
@@ -498,7 +485,8 @@
           }
           if (uploadedImage && (type === 'front' || type === 'back' || type === 'detail')) {
             const aImg = new Image(); await new Promise(r => { aImg.onload = r; aImg.src = uploadedImage; });
-            ctx.globalAlpha = 0.9; ctx.globalCompositeOperation = garmentColor === 'white' ? 'multiply' : 'screen';
+            ctx.globalAlpha = 0.9;
+            ctx.globalCompositeOperation = garmentColor === 'white' ? 'multiply' : 'screen';
             ctx.drawImage(aImg, pos.l, pos.t, pos.w, (aImg.naturalHeight/aImg.naturalWidth)*pos.w);
             ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1.0;
           }
@@ -533,7 +521,7 @@
         <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden relative" onDragEnter={(e) => handleDragEvent('enter', e)} onDragOver={(e) => e.preventDefault()} onDragLeave={(e) => handleDragEvent('leave', e)} onDrop={(e) => handleDragEvent('drop', e)}>
           {isDragOver && <div className="absolute inset-0 z-[9999] bg-blue-500/10 backdrop-blur-[2px] m-3 border-4 border-dashed border-blue-500 rounded-3xl flex items-center justify-center pointer-events-none transition-all duration-100"><div className="bg-white px-8 py-6 rounded-3xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-100"><div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center"><Icon path={Paths.Upload} size={28} className="text-blue-500" /></div><div className="text-center"><h3 className="font-roboto-bold text-xl text-slate-800">Drop Design</h3><p className="text-slate-500 text-sm mt-1">Release to upload</p></div></div></div>}
           <PWAInstallPrompt />
-          {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} isInverted={isInverted} onConfirm={(t, p, newRaw) => { setTransform(t); setPaperSize(p); setRawImage(newRaw); setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
+          {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} isInverted={isInverted} onConfirm={(t, p, newRaw) => { setTransform(t); setPaperSize(p); if (newRaw) { setRawImage(newRaw); const img = new Image(); img.onload = () => setProcessedImage(img); img.src = newRaw; } setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
           
           <div className="flex-1 w-full relative flex flex-col items-center justify-center bg-[#f8fafc] overflow-hidden">
              <div ref={carouselRef} onScroll={handleCarouselScroll} onMouseDown={handleGrabStart} onMouseMove={handleGrabMove} onMouseUp={handleGrabEnd} onMouseLeave={handleGrabEnd} onTouchStart={handleGrabStart} onTouchMove={handleGrabMove} onTouchEnd={handleGrabEnd} className="flex flex-col md:flex-row w-full h-full overflow-y-auto md:overflow-y-hidden md:overflow-x-auto hide-scrollbar items-center justify-start cursor-grab active:cursor-grabbing px-4">
