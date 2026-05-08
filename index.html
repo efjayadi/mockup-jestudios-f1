@@ -200,19 +200,41 @@
       const counts = {}; samples.forEach(c => { const k = `${Math.floor(c.r/8)},${Math.floor(c.g/8)},${Math.floor(c.b/8)}`; counts[k] = (counts[k]||0)+1; });
       const topColorKey = Object.keys(counts).length > 0 ? Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b) : "255,255,255";
       const [bgR, bgG, bgB] = topColorKey.split(',').map(v => v * 8);
+      
+      const w = temp.width;
+      const h = temp.height;
+      const rawAlpha = new Uint8Array(w * h);
+
+      // Pass 1: Initial color distance mask
       for (let i = 0; i < data.length; i += 4) { 
         const d = (Math.abs(data[i]-bgR) + Math.abs(data[i+1]-bgG) + Math.abs(data[i+2]-bgB)) / 3; 
-        
-        // DTF Fix: Tight anti-aliasing band. Keeps edges smooth but prevents wide gradients
-        if (d < 35) {
-          data[i+3] = 0;    // Fully transparent
-        } else if (d < 50) {
-          // 1-2 pixel smooth transition to avoid jagged stairs
-          data[i+3] = Math.round(((d - 35) / 15) * 255);
-        } else {
-          data[i+3] = 255; // Fully opaque
+        rawAlpha[i/4] = d < 30 ? 0 : (d < 80 ? ((d - 30) / 50) * 255 : 255);
+      }
+
+      // Pass 2: Spatial Horizontal Blur (Feathering to fix stair-steps)
+      const blurX = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = y * w + x;
+          if (x > 1 && x < w - 2) blurX[idx] = (rawAlpha[idx-2] + rawAlpha[idx-1]*2 + rawAlpha[idx]*2 + rawAlpha[idx+1]*2 + rawAlpha[idx+2]) / 8;
+          else blurX[idx] = rawAlpha[idx];
         }
       }
+
+      // Pass 3: Spatial Vertical Blur & DTF Thresholding
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = y * w + x;
+          let a = blurX[idx];
+          if (y > 1 && y < h - 2) a = (blurX[idx-w*2] + blurX[idx-w]*2 + blurX[idx]*2 + blurX[idx+w]*2 + blurX[idx+w*2]) / 8;
+          
+          // DTF Fix: Tighten the feathered edge. Kills halos but preserves a smooth 1-2px anti-aliased edge.
+          if (a < 45) data[idx*4+3] = 0;
+          else if (a > 210) data[idx*4+3] = 255;
+          else data[idx*4+3] = Math.round(((a - 45) / 165) * 255);
+        }
+      }
+
       tCtx.putImageData(imageData, 0, 0); return new Promise(r => { const o = new Image(); o.onload = () => r(o); o.src = temp.toDataURL(); });
     };
 
@@ -358,24 +380,6 @@
         fCtx.globalCompositeOperation = 'destination-out';
         fCtx.drawImage(eraserMaskRef.current, 0, 0);
         
-        // DTF Fix + Smooth Edges: Instead of a hard binary threshold (which causes jagged stairs),
-        // we compress the alpha channel. Faint glows (< 35) are stripped to avoid DTF white halos,
-        // while mid-tones are kept to preserve smooth anti-aliased edges.
-        const finalImageData = fCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height);
-        const fd = finalImageData.data;
-        for (let i = 0; i < fd.length; i += 4) {
-          const alpha = fd[i+3];
-          if (alpha < 35) {
-            fd[i+3] = 0; // Strip faint halos
-          } else if (alpha > 220) {
-            fd[i+3] = 255; // Solid core
-          } else {
-            // Preserve a very tight anti-aliasing transition
-            fd[i+3] = Math.round(((alpha - 35) / 185) * 255);
-          }
-        }
-        fCtx.putImageData(finalImageData, 0, 0);
-        
         onConfirm(transform, paper, finalCanvas.toDataURL());
       };
 
@@ -447,11 +451,13 @@
       const [pinUrl, setPinUrl] = useState("");
       const [isFetchingPin, setIsFetchingPin] = useState(false);
       const [pinError, setPinError] = useState("");
+      const [showUploadMenu, setShowUploadMenu] = useState(true);
 
       const dragCounter = useRef(0);
       const fileInputRef = useRef(null);
       const carouselRef = useRef(null);
       const grabRef = useRef({ isDown: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
+      const draggedDistance = useRef(0);
 
       const VIEWS = ['front', 'back', 'detail'];
       const DOWNLOAD_VIEWS = ['front', 'back', 'detail', 'fabric', 'size'];
@@ -472,6 +478,7 @@
 
       const handleGrabStart = (e) => {
         grabRef.current.isDown = true;
+        draggedDistance.current = 0;
         grabRef.current.startX = (e.touches ? e.touches[0].pageX : e.pageX) - carouselRef.current.offsetLeft;
         grabRef.current.startY = (e.touches ? e.touches[0].pageY : e.pageY) - carouselRef.current.offsetTop;
         grabRef.current.scrollLeft = carouselRef.current.scrollLeft;
@@ -483,11 +490,21 @@
         if (!e.touches) e.preventDefault();
         const curX = (e.touches ? e.touches[0].pageX : e.pageX) - carouselRef.current.offsetLeft;
         const curY = (e.touches ? e.touches[0].pageY : e.pageY) - carouselRef.current.offsetTop;
-        if (window.innerWidth < 768) { carouselRef.current.scrollTop = grabRef.current.scrollTop - (curY - grabRef.current.startY) * 1.5; } 
-        else { carouselRef.current.scrollLeft = grabRef.current.scrollLeft - (curX - grabRef.current.startX) * 1.5; }
+        
+        const dx = curX - grabRef.current.startX;
+        const dy = curY - grabRef.current.startY;
+        draggedDistance.current = Math.sqrt(dx*dx + dy*dy);
+
+        if (window.innerWidth < 768) { carouselRef.current.scrollTop = grabRef.current.scrollTop - dy * 1.5; } 
+        else { carouselRef.current.scrollLeft = grabRef.current.scrollLeft - dx * 1.5; }
       };
 
       const handleGrabEnd = () => { grabRef.current.isDown = false; };
+
+      const handleCarouselClick = () => {
+        if (draggedDistance.current > 10) return;
+        setShowUploadMenu(p => !p);
+      };
 
       useEffect(() => {
         if (!rawImage) return;
@@ -507,6 +524,7 @@
 
       const processFile = (file) => {
         if (!file || !file.type.startsWith('image/')) return;
+        setShowUploadMenu(false);
         const reader = new FileReader(); reader.onload = async (ev) => {
           const img = new Image(); img.onload = async () => {
             setRawImage(ev.target.result); const proc = await createProcessedImage(img); setProcessedImage(proc);
@@ -680,6 +698,7 @@
 
       return (
         <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden relative" onDragEnter={(e) => handleDragEvent('enter', e)} onDragOver={(e) => e.preventDefault()} onDragLeave={(e) => handleDragEvent('leave', e)} onDrop={(e) => handleDragEvent('drop', e)}>
+          <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => processFile(e.target.files[0])} />
           {isDragOver && <div className="absolute inset-0 z-[9999] bg-blue-500/10 backdrop-blur-[2px] m-3 border-4 border-dashed border-blue-500 rounded-3xl flex items-center justify-center pointer-events-none transition-all duration-100"><div className="bg-white px-8 py-6 rounded-3xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-100"><div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center"><Icon path={Paths.Upload} size={28} className="text-blue-500" /></div><div className="text-center"><h3 className="font-roboto-bold text-xl text-slate-800">Drop Design</h3><p className="text-slate-500 text-sm mt-1">Release to upload</p></div></div></div>}
           <PWAInstallPrompt />
           
@@ -726,7 +745,26 @@
           {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} isInverted={isInverted} onConfirm={(t, p, newRaw) => { setTransform(t); setPaperSize(p); if (newRaw) { setRawImage(newRaw); const img = new Image(); img.onload = () => setProcessedImage(img); img.src = newRaw; } setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
           
           <div className="flex-1 w-full relative flex flex-col items-center justify-center bg-[#f8fafc] overflow-hidden">
-             <div ref={carouselRef} onScroll={handleCarouselScroll} onMouseDown={handleGrabStart} onMouseMove={handleGrabMove} onMouseUp={handleGrabEnd} onMouseLeave={handleGrabEnd} onTouchStart={handleGrabStart} onTouchMove={handleGrabMove} onTouchEnd={handleGrabEnd} className="flex flex-col md:flex-row w-full h-full overflow-y-auto md:overflow-y-hidden md:overflow-x-auto hide-scrollbar items-center justify-start cursor-grab active:cursor-grabbing px-4">
+             {showUploadMenu && (
+               <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none bg-black/5 backdrop-blur-[1.5px] transition-all">
+                 <div className="flex gap-5 pointer-events-auto animate-in zoom-in-95 duration-150">
+                   <button onClick={(e) => { e.stopPropagation(); fileInputRef.current.click(); }} className="flex flex-col items-center justify-center w-28 h-28 bg-white/95 backdrop-blur-xl border border-white/50 rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all text-slate-700 hover:text-blue-600">
+                     <div className="w-12 h-12 rounded-full bg-blue-50 shadow-sm flex items-center justify-center mb-2">
+                       <Icon path={Paths.Upload} size={24} className="text-blue-600" />
+                     </div>
+                     <span className="text-[11px] font-black uppercase tracking-wider text-slate-800">Upload</span>
+                   </button>
+                   <button onClick={(e) => { e.stopPropagation(); setIsPinModalOpen(true); setShowUploadMenu(false); }} className="flex flex-col items-center justify-center w-28 h-28 bg-white/95 backdrop-blur-xl border border-white/50 rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all text-slate-700 hover:text-blue-600">
+                     <div className="w-12 h-12 rounded-full bg-blue-50 shadow-sm flex items-center justify-center mb-2">
+                       <Icon path={Paths.Link} size={24} className="text-blue-600" />
+                     </div>
+                     <span className="text-[11px] font-black uppercase tracking-wider text-slate-800">Link</span>
+                   </button>
+                 </div>
+               </div>
+             )}
+
+             <div ref={carouselRef} onScroll={handleCarouselScroll} onClick={handleCarouselClick} onMouseDown={handleGrabStart} onMouseMove={handleGrabMove} onMouseUp={handleGrabEnd} onMouseLeave={handleGrabEnd} onTouchStart={handleGrabStart} onTouchMove={handleGrabMove} onTouchEnd={handleGrabEnd} className="flex flex-col md:flex-row w-full h-full overflow-y-auto md:overflow-y-hidden md:overflow-x-auto hide-scrollbar items-center justify-start cursor-grab active:cursor-grabbing px-4">
                 {VIEWS.map((v) => renderView(v))}
              </div>
              <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-1.5 z-10 pointer-events-none md:hidden">
@@ -744,14 +782,11 @@
                 </div>
               </div>
               <div className="flex items-center gap-2 w-full overflow-x-auto hide-scrollbar">
-                <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => processFile(e.target.files[0])} />
-                <button title="Upload" onClick={() => fileInputRef.current.click()} className="flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center bg-white hover:bg-slate-50 duration-100 overflow-hidden">{!rawImage ? <Icon path={Paths.Upload} size={16} className="text-slate-600" /> : <img src={uploadedImage} className="w-full h-full object-contain p-1" />}</button>
-                <button onClick={() => setIsPinModalOpen(true)} className="flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center bg-white hover:bg-slate-50 duration-100" title="Import from Link"><Icon path={Paths.Link} size={16} className="text-slate-600" /></button>
-                <div className="flex h-10 border rounded-xl bg-white overflow-hidden">
-                   <button onClick={() => handleSnap('left')} className="w-10 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapLeft} size={14} /></button>
-                   <button onClick={() => handleSnap('right')} className="w-10 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapRight} size={14} /></button>
-                   <button onClick={() => handleSnap('up')} className="w-10 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapUp} size={14} /></button>
-                   <button onClick={() => handleSnap('down')} className="w-10 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.SnapDown} size={14} /></button>
+                <div className="flex h-10 border rounded-xl bg-white overflow-hidden flex-1 max-w-[200px]">
+                   <button onClick={() => handleSnap('left')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapLeft} size={14} /></button>
+                   <button onClick={() => handleSnap('right')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapRight} size={14} /></button>
+                   <button onClick={() => handleSnap('up')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapUp} size={14} /></button>
+                   <button onClick={() => handleSnap('down')} className="flex-1 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.SnapDown} size={14} /></button>
                 </div>
                 <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 ${isBgRemoved ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Remove BG"><Icon path={Paths.Eraser} size={16} /></button>
                 <button onClick={() => setIsInverted(!isInverted)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 ${isInverted ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Invert Colors"><Icon path={Paths.Invert} size={16} /></button>
