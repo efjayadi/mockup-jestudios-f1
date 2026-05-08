@@ -203,9 +203,12 @@
       for (let i = 0; i < data.length; i += 4) { 
         const d = (Math.abs(data[i]-bgR) + Math.abs(data[i+1]-bgG) + Math.abs(data[i+2]-bgB)) / 3; 
         
-        // DTF Fix: Use a hard binary threshold to prevent semi-transparent pixels printing a solid white base
-        if (d < 45) {
+        // DTF Fix: Tight anti-aliasing band. Keeps edges smooth but prevents wide gradients
+        if (d < 35) {
           data[i+3] = 0;    // Fully transparent
+        } else if (d < 50) {
+          // 1-2 pixel smooth transition to avoid jagged stairs
+          data[i+3] = Math.round(((d - 35) / 15) * 255);
         } else {
           data[i+3] = 255; // Fully opaque
         }
@@ -355,11 +358,21 @@
         fCtx.globalCompositeOperation = 'destination-out';
         fCtx.drawImage(eraserMaskRef.current, 0, 0);
         
-        // DTF Fix: Binarize the alpha channel to strip out soft anti-aliased edges left by the eraser brush
+        // DTF Fix + Smooth Edges: Instead of a hard binary threshold (which causes jagged stairs),
+        // we compress the alpha channel. Faint glows (< 35) are stripped to avoid DTF white halos,
+        // while mid-tones are kept to preserve smooth anti-aliased edges.
         const finalImageData = fCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height);
         const fd = finalImageData.data;
         for (let i = 0; i < fd.length; i += 4) {
-          fd[i+3] = fd[i+3] < 128 ? 0 : 255;
+          const alpha = fd[i+3];
+          if (alpha < 35) {
+            fd[i+3] = 0; // Strip faint halos
+          } else if (alpha > 220) {
+            fd[i+3] = 255; // Solid core
+          } else {
+            // Preserve a very tight anti-aliasing transition
+            fd[i+3] = Math.round(((alpha - 35) / 185) * 255);
+          }
         }
         fCtx.putImageData(finalImageData, 0, 0);
         
