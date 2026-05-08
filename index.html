@@ -88,20 +88,20 @@
 
   <script type="text/babel">
     // ============================================================================
-    // GITHUB DEPLOYMENT - FIREBASE CONFIG
-    // When hosting on GitHub, replace these with your Firebase project config.
+    // FIREBASE PRODUCTION CONFIG
     // ============================================================================
-    const GITHUB_FIREBASE_CONFIG = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
+    const PRODUCTION_FIREBASE_CONFIG = {
+      apiKey: "AIzaSyBAjVE4UITlteWcjJUgCe77BZEaiun0Uig",
+      authDomain: "jestudios-mockup-f1.firebaseapp.com",
+      projectId: "jestudios-mockup-f1",
+      storageBucket: "jestudios-mockup-f1.firebasestorage.app",
+      messagingSenderId: "687758116320",
+      appId: "1:687758116320:web:0ec361b5a3ca25b9151785"
     };
 
     // Helper to prevent Babel from transpiling dynamic imports into require()
-    const loadFirebase = async (module) => await new Function(`return import("https://www.gstatic.com/firebasejs/11.6.1/${module}")`)();
+    // SDK set to v12.13.0
+    const loadFirebase = async (module) => await new Function(`return import("https://www.gstatic.com/firebasejs/12.13.0/${module}")`)();
 
     const { useState, useRef, useEffect, useCallback } = React;
 
@@ -309,7 +309,7 @@
       return found ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY } : { x: 0, y: 0, w: img.width, h: img.height };
     };
 
-    function ArtworkStudio({ rawImage, initialTransform, initialPaper, isBgRemoved, isInverted, onConfirm, onCancel }) {
+    function ArtworkStudio({ rawImage, initialTransform, initialPaper, isBgRemoved, setIsBgRemoved, isInverted, setIsInverted, onConfirm, onCancel }) {
       const canvasRef = useRef(null);
       const eraserMaskRef = useRef(null); 
       const [images, setImages] = useState({ original: null, processed: null });
@@ -365,27 +365,8 @@
 
       useEffect(() => { render(); }, [render]);
 
-      const getCoord = (e) => {
-        if (!e) return { x: 0, y: 0, localX: 0, localY: 0, ratio: 1 };
-        const rect = canvasRef.current.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const ratio = canvasRef.current.width / rect.width;
-        
-        const canvasX = (clientX - rect.left) * ratio;
-        const canvasY = (clientY - rect.top) * ratio;
-        
-        const localX = (canvasX - transform.x) / transform.scale + (images.original.width / 2);
-        const localY = (canvasY - transform.y) / transform.scale + (images.original.height / 2);
-        
-        return { x: clientX, y: clientY, localX, localY, ratio };
-      };
-
       const handleInteraction = (type, e) => {
         if (!canvasRef.current || !images.original) return;
-        
-        if (e.cancelable) e.preventDefault();
-        if (e.stopPropagation) e.stopPropagation();
 
         if (type === 'end') {
           isDragging.current = false;
@@ -393,7 +374,33 @@
           return;
         }
 
-        const { x, y, localX, localY, ratio } = getCoord(e);
+        let clientX = 0, clientY = 0;
+        let isPinch = false;
+        let pinchDist = 0;
+
+        if (e.touches && e.touches.length > 0) {
+          clientX = e.touches[0].clientX;
+          clientY = e.touches[0].clientY;
+          if (e.touches.length === 2) {
+            isPinch = true;
+            pinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+          }
+        } else {
+          clientX = e.clientX;
+          clientY = e.clientY;
+        }
+
+        const rect = canvasRef.current.getBoundingClientRect();
+        const ratio = canvasRef.current.width / rect.width;
+        
+        // Ensure ratio is valid
+        if (!ratio || isNaN(ratio)) return;
+
+        const canvasX = (clientX - rect.left) * ratio;
+        const canvasY = (clientY - rect.top) * ratio;
+        
+        const localX = (canvasX - transform.x) / transform.scale + (images.original.width / 2);
+        const localY = (canvasY - transform.y) / transform.scale + (images.original.height / 2);
 
         if (type === 'start') {
           if (isEraserActive) {
@@ -402,12 +409,12 @@
             mCtx.beginPath();
             mCtx.moveTo(localX, localY);
           } else {
-            if (e.touches && e.touches.length === 2) {
-              startDist.current = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+            if (isPinch) {
+              startDist.current = pinchDist;
               startScale.current = transform.scale;
             } else {
               isDragging.current = true;
-              lastPos.current = { x, y };
+              lastPos.current = { x: clientX, y: clientY };
             }
           }
         } else if (type === 'move') {
@@ -420,12 +427,19 @@
             mCtx.stroke();
             render();
           } else if (isDragging.current) {
-            if (e.touches && e.touches.length === 2) {
-              const dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
-              setTransform(p => ({ ...p, scale: startScale.current * (dist / startDist.current) }));
+            if (isPinch && startDist.current > 0) {
+              setTransform(p => ({ ...p, scale: startScale.current * (pinchDist / startDist.current) }));
             } else {
-              setTransform(p => ({ ...p, x: p.x + (x - lastPos.current.x) * ratio, y: p.y + (y - lastPos.current.y) * ratio }));
-              lastPos.current = { x, y };
+              const dx = clientX - lastPos.current.x;
+              const dy = clientY - lastPos.current.y;
+              if (dx !== 0 || dy !== 0) {
+                setTransform(p => ({
+                  ...p,
+                  x: p.x + (dx * ratio),
+                  y: p.y + (dy * ratio)
+                }));
+                lastPos.current = { x: clientX, y: clientY };
+              }
             }
           }
         }
@@ -444,39 +458,86 @@
         onConfirm(transform, paper, finalCanvas.toDataURL());
       };
 
+      const handleSnap = (direction) => {
+        const activeImg = isBgRemoved ? images.processed : images.original;
+        if (!activeImg) return;
+        const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
+        const bounds = detectContentBounds(activeImg);
+        
+        setTransform(p => {
+          const sw = activeImg.width * p.scale;
+          const sh = activeImg.height * p.scale;
+          let nx = p.x, ny = p.y;
+          if (direction === 'left') nx = (sw / 2) - bounds.x * p.scale;
+          if (direction === 'right') nx = target.w - (sw / 2) + (activeImg.width - (bounds.x + bounds.w)) * p.scale;
+          if (direction === 'up') ny = (sh / 2) - bounds.y * p.scale;
+          if (direction === 'down') ny = target.h - (sh / 2) + (activeImg.height - (bounds.y + bounds.h)) * p.scale;
+          return { ...p, x: nx, y: ny };
+        });
+      };
+
       return (
-        <div className="fixed inset-0 z-[100] bg-slate-100 flex flex-col md:flex-row animate-in fade-in duration-150 touch-none">
+        <div className="fixed inset-0 z-[100] bg-slate-100 flex flex-col md:flex-row animate-in fade-in duration-150 touch-none select-none">
           <div className="flex-1 bg-[#e2e8f0] relative flex items-center justify-center overflow-hidden p-4 md:p-8" 
+               onMouseDown={(e) => handleInteraction('start', e)}
                onMouseMove={(e) => handleInteraction('move', e)} 
                onMouseUp={(e) => handleInteraction('end', e)} 
                onMouseLeave={(e) => handleInteraction('end', e)}
+               onTouchStart={(e) => handleInteraction('start', e)}
                onTouchMove={(e) => handleInteraction('move', e)}
                onTouchEnd={(e) => handleInteraction('end', e)}>
-            <div className="relative w-full h-full flex items-center justify-center">
+            <div className="relative w-full h-full flex items-center justify-center pointer-events-none">
               <canvas ref={canvasRef} 
-                      className={`max-w-full max-h-full object-contain bg-white studio-canvas-bg rounded-sm touch-none ${isEraserActive ? 'cursor-crosshair' : 'cursor-default'}`} 
-                      onTouchStart={(e) => handleInteraction('start', e)} 
-                      onMouseDown={(e) => handleInteraction('start', e)} />
-            </div>
-            
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/90 px-3 py-2 rounded-xl z-30">
-               <button onClick={() => setTransform(p => ({...p, scale: p.scale*0.99}))} className="w-8 h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-lg active:scale-95 transition-colors duration-100"><Icon path={Paths.Minus} size={16}/></button>
-               <div className="flex flex-col items-center w-12"><span className="text-white/50 text-[6px] font-black uppercase mb-0.5">Scale</span><input type="number" value={Math.round((transform.scale / baseScale.current) * 100)} onChange={e => setTransform(p => ({...p, scale: (e.target.value/100)*baseScale.current}))} className="w-full bg-transparent text-white text-center font-bold text-xs focus:outline-none" /></div>
-               <button onClick={() => setTransform(p => ({...p, scale: p.scale*1.01}))} className="w-8 h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-lg active:scale-95 transition-colors duration-100"><Icon path={Paths.Plus} size={16}/></button>
+                      draggable={false}
+                      onDragStart={(e) => e.preventDefault()}
+                      onDrop={(e) => e.preventDefault()}
+                      className={`max-w-full max-h-full object-contain bg-white studio-canvas-bg rounded-sm touch-none pointer-events-auto ${isEraserActive ? 'cursor-crosshair' : 'cursor-move'}`} />
             </div>
           </div>
           
-          <div className="w-full md:w-[260px] bg-white p-4 flex flex-col justify-between border-l border-slate-200 z-40 relative">
+          <div className="w-full md:w-[260px] bg-white p-4 flex flex-col justify-between border-l border-slate-200 z-40 relative overflow-y-auto">
             <div className="space-y-6">
               <div className="flex justify-between items-center pb-2 border-b"><h2 className="font-roboto-bold text-sm text-slate-800 uppercase tracking-tighter">Edit Design</h2><button onClick={onCancel} className="p-1.5 bg-slate-50 rounded-full hover:bg-slate-200 duration-100"><Icon path={Paths.Close} size={14} /></button></div>
+              
               <div>
-                <span className="text-[10px] font-black uppercase text-slate-400 block mb-2">Paper</span>
-                <div className="flex bg-slate-100 p-1 rounded-lg">{['A4', 'A3'].map(size => (<button key={size} onClick={() => setPaper(size)} className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all duration-100 ${paper === size ? 'bg-white text-black shadow-sm' : 'text-slate-400'}`}>{size}</button>))}</div>
+                <span className="text-[10px] font-black uppercase text-slate-400 block mb-2">Paper & Adjustments</span>
+                <div className="flex bg-slate-100 p-1 rounded-lg mb-3">{['A4', 'A3'].map(size => (<button key={size} onClick={() => setPaper(size)} className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all duration-100 ${paper === size ? 'bg-white text-black shadow-sm' : 'text-slate-400'}`}>{size}</button>))}</div>
+                
+                <div className="flex gap-2">
+                  <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex-1 flex flex-col items-center justify-center py-2 border rounded-xl transition-all duration-100 ${isBgRemoved ? 'bg-black text-white border-black' : 'bg-white text-slate-500 border-slate-200'}`}><Icon path={Paths.Eraser} size={16} className="mb-1" /> <span className="text-[9px] font-bold uppercase">No BG</span></button>
+                  <button onClick={() => setIsInverted(!isInverted)} className={`flex-1 flex flex-col items-center justify-center py-2 border rounded-xl transition-all duration-100 ${isInverted ? 'bg-black text-white border-black' : 'bg-white text-slate-500 border-slate-200'}`}><Icon path={Paths.Invert} size={16} className="mb-1" /> <span className="text-[9px] font-bold uppercase">Invert</span></button>
+                </div>
               </div>
+
+              <div>
+                <span className="text-[10px] font-black uppercase text-slate-400 block mb-2">Scale / Zoom</span>
+                <div className="flex h-10 border border-slate-200 rounded-xl bg-white overflow-hidden">
+                   <button onClick={() => setTransform(p => ({...p, scale: p.scale*0.99}))} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50"><Icon path={Paths.Minus} size={14} /></button>
+                   <div className="flex-[2] flex items-center justify-center border-r border-slate-200">
+                     <input type="number" value={Math.round((transform.scale / baseScale.current) * 100)} onChange={e => setTransform(p => ({...p, scale: (e.target.value/100)*baseScale.current}))} className="w-full bg-transparent text-slate-800 text-center font-bold text-xs focus:outline-none" />
+                     <span className="text-[10px] font-bold text-slate-400 pr-3">%</span>
+                   </div>
+                   <button onClick={() => setTransform(p => ({...p, scale: p.scale*1.01}))} className="flex-1 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.Plus} size={14} /></button>
+                </div>
+              </div>
+
               <div>
                 <div className="flex justify-between items-center mb-2">
-                   <span className="text-[10px] font-black uppercase text-slate-400">Eraser Mode</span>
-                   <button onClick={() => setIsEraserActive(!isEraserActive)} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isEraserActive ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path={Paths.Eraser} size={16} /></button>
+                   <span className="text-[10px] font-black uppercase text-slate-400">Alignment</span>
+                   <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wide bg-slate-100 px-2 py-0.5 rounded-full">Drag image to move</span>
+                </div>
+                <div className="flex h-10 border border-slate-200 rounded-xl bg-white overflow-hidden">
+                   <button onClick={() => handleSnap('left')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50"><Icon path={Paths.SnapLeft} size={14} /></button>
+                   <button onClick={() => handleSnap('right')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50"><Icon path={Paths.SnapRight} size={14} /></button>
+                   <button onClick={() => handleSnap('up')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50"><Icon path={Paths.SnapUp} size={14} /></button>
+                   <button onClick={() => handleSnap('down')} className="flex-1 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.SnapDown} size={14} /></button>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                   <span className="text-[10px] font-black uppercase text-slate-400">Manual Eraser</span>
+                   <button onClick={() => setIsEraserActive(!isEraserActive)} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isEraserActive ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path={Paths.Eraser} size={14} /></button>
                 </div>
                 {isEraserActive && (
                   <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -486,11 +547,95 @@
                 )}
               </div>
             </div>
-            <button onClick={handleFinalize} className="w-full py-3 bg-black text-white rounded-lg font-black uppercase tracking-[0.1em] text-[10px] active:scale-95 transition-all duration-100">Apply Changes</button>
+            <button onClick={handleFinalize} className="w-full py-3 bg-black text-white rounded-lg font-black uppercase tracking-[0.1em] text-[10px] active:scale-95 transition-all duration-100 mt-4 shrink-0">Apply Changes</button>
           </div>
         </div>
       );
     }
+
+    const SCRIPT_TEXT = `// --- 1. SETUP YOUR DATA ---
+const prices = [
+  99000, 99000, 99000, 99000, 109000, 119000, 129000, // 30s: S, M, L, XL, 2XL, 3XL, 4XL
+  109000, 109000, 109000, 109000, 119000, 129000, 139000, // 24s: S, M, L, XL, 2XL, 3XL, 4XL
+  149000, 149000, 149000, 149000, 159000, 169000, 179000  // Long Sleeve: S, M, L, XL, 2XL, 3XL, 4XL
+];
+const targetStock = 60;
+
+// Join the array using the HTML <br> tag instead of \\n
+const descriptionText = [
+  "Bikin Formula 1 lebih populer dari MotoGP.",
+  "Capek nggak sih tiap ngobrol soal F1 sama orang baru, ujung-ujungnya mereka jawab, 'Gue sih lebih ngikutin MotoGP.'",
+  "bayangin kalau suatu hari lo keluar rumah, terus langsung tahu ada sesama F1 fans cuma dari kaos yang mereka pakai.",
+  "Itu yang kita bangun di JeStudios.",
+  "<br>Detail Produk",
+  "• Bahan 100% cotton (24s & 30s)",
+  "• Sablon digital print, detail tajam",
+  "• Regular fit modern, clean",
+  "• Adem, tidak mudah melar, warna awet",
+  "<br>Catatan F1 Fans",
+  "• dibuat oleh fans F1, untuk Fans F1",
+  "• Cocok untuk race weekend, nobar, atau daily",
+  "• Bukan kaos pasaran",
+  "<br>Perhatian",
+  "• Cek size chart, jangan salah pilih kayak Ferrari Strategist",
+  "• Stock ready, pit crew standby packing",
+  "<br>Info Order",
+  "• Proses maks. 1×24 jam",
+  "• Barang sudah QC",
+  "• Minggu libur",
+  "<br>Terima kasih sudah memilih JeStudios"
+].join('<br>'); // Forces a strict single line break without paragraph margins
+
+// Setter for standard inputs
+const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+
+// --- 2. UPDATE PRICES ---
+const allPriceInputs = Array.from(document.querySelectorAll('input')).filter(input => {
+  const container = input.closest('div') || input.parentElement.parentElement;
+  return container && container.textContent.includes('Rp') && input.type === 'text';
+});
+
+const tablePriceInputs = allPriceInputs.slice(-21);
+tablePriceInputs.forEach((input, index) => {
+  if (index < prices.length) {
+    nativeInputValueSetter.call(input, prices[index]);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+});
+
+// --- 3. UPDATE STOCK ---
+const stockInputs = Array.from(document.querySelectorAll('input[type="text"]'))
+  .filter(input => input.value === '0' || input.placeholder === '0');
+
+const tableStockInputs = stockInputs.slice(-21);
+tableStockInputs.forEach(input => {
+  nativeInputValueSetter.call(input, targetStock);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+});
+
+// --- 4. UPDATE DESCRIPTION ---
+const descriptionContainer = document.querySelector('.product-description');
+
+if (descriptionContainer) {
+  const editor = descriptionContainer.querySelector('[contenteditable="true"]') || descriptionContainer;
+  
+  // Changed from innerText to innerHTML so it reads the <br> tags properly
+  editor.innerHTML = descriptionText;
+  
+  editor.dispatchEvent(new Event('input', { bubbles: true }));
+  editor.dispatchEvent(new Event('change', { bubbles: true }));
+  editor.dispatchEvent(new Event('blur', { bubbles: true })); 
+  
+  console.log("✅ Deskripsi berhasil masuk!");
+} else {
+  console.log("⚠️ Gagal menemukan kotak deskripsi.");
+}
+
+// Re-formatting for clipboard fallback just in case
+const plainTextFallback = descriptionText.replace(/<br>/g, '\\r');
+navigator.clipboard.writeText(plainTextFallback).catch(() => {});
+
+console.log(\`🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.\`);`;
 
     function App() {
       // Firebase State
@@ -528,6 +673,7 @@
       const carouselRef = useRef(null);
       const grabRef = useRef({ isDown: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
       const draggedDistance = useRef(0);
+      const pinInputRef = useRef(null);
 
       const VIEWS = ['front', 'back', 'detail'];
       const DOWNLOAD_VIEWS = ['front', 'back', 'detail', 'fabric', 'size'];
@@ -541,24 +687,19 @@
             const { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = await loadFirebase('firebase-auth.js');
             const { getFirestore } = await loadFirebase('firebase-firestore.js');
 
-            const firebaseConfig = typeof __firebase_config !== 'undefined' 
-              ? JSON.parse(__firebase_config) 
-              : GITHUB_FIREBASE_CONFIG;
-              
-            // Basic guard for GitHub fallback usage before it's configured
-            if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
-               console.warn("Firebase config missing. Cloud features will be disabled.");
-               return;
-            }
-
-            const app = initializeApp(firebaseConfig);
+            const app = initializeApp(PRODUCTION_FIREBASE_CONFIG);
             const auth = getAuth(app);
             const dbInstance = getFirestore(app);
             setDb(dbInstance);
 
             const initAuth = async () => {
               if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
+                try {
+                  await signInWithCustomToken(auth, __initial_auth_token);
+                } catch (e) {
+                  console.warn("Custom token sign-in failed (likely due to custom Firebase config). Falling back to anonymous auth.", e);
+                  await signInAnonymously(auth);
+                }
               } else {
                 await signInAnonymously(auth);
               }
@@ -581,7 +722,7 @@
         
         const initSnapshot = async () => {
           const { collection, onSnapshot } = await loadFirebase('firebase-firestore.js');
-          const appId = typeof __app_id !== 'undefined' ? __app_id : GITHUB_FIREBASE_CONFIG.appId || 'default-app-id';
+          const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
           const designsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'designs');
           
           unsubscribeSnapshot = onSnapshot(designsRef, (snapshot) => {
@@ -597,6 +738,16 @@
         
         return () => { if (unsubscribeSnapshot) unsubscribeSnapshot(); };
       }, [user, db]);
+
+      // Autofocus for Pin URL input
+      useEffect(() => {
+        if (isPinModalOpen) {
+          const timer = setTimeout(() => {
+            if (pinInputRef.current) pinInputRef.current.focus();
+          }, 100);
+          return () => clearTimeout(timer);
+        }
+      }, [isPinModalOpen]);
 
       useEffect(() => {
         const updateScale = () => { if (carouselRef.current) { const canvas = carouselRef.current.querySelector('.canvas-wrapper'); if (canvas) setEditorScale(canvas.getBoundingClientRect().height / CANVAS_SIZE); } };
@@ -686,28 +837,6 @@
         reader.readAsDataURL(file);
       };
 
-      const handleSnap = (direction) => {
-        const activeImg = isBgRemoved ? processedImage : null;
-        const imgRef = activeImg || (rawImage ? new Image() : null);
-        if (!imgRef) return;
-        const applySnap = (readyImg) => {
-          const target = paperSize === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
-          const bounds = detectContentBounds(readyImg);
-          const sw = readyImg.width * transform.scale;
-          const sh = readyImg.height * transform.scale;
-          setTransform(p => {
-            let nx = p.x, ny = p.y;
-            if (direction === 'left') nx = (sw / 2) - bounds.x * transform.scale;
-            if (direction === 'right') nx = target.w - (sw / 2) + (readyImg.width - (bounds.x + bounds.w)) * transform.scale;
-            if (direction === 'up') ny = (sh / 2) - bounds.y * transform.scale;
-            if (direction === 'down') ny = target.h - (sh / 2) + (readyImg.height - (bounds.y + bounds.h)) * transform.scale;
-            return { ...p, x: nx, y: ny };
-          });
-        };
-        if (activeImg) { applySnap(activeImg); } 
-        else if (rawImage) { const tempImg = new Image(); tempImg.onload = () => applySnap(tempImg); tempImg.src = rawImage; }
-      };
-
       // Download and save logic
       const downloadMockup = async () => {
         // --- 1. Save Print File to Cloud Backup ---
@@ -715,7 +844,7 @@
           setSaveStatus("Backing up print file...");
           try {
             const { doc, setDoc, collection } = await loadFirebase('firebase-firestore.js');
-            const appId = typeof __app_id !== 'undefined' ? __app_id : GITHUB_FIREBASE_CONFIG.appId || 'default-app-id';
+            const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
             
             const designId = `design_${Date.now()}`;
             const designsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'designs');
@@ -824,7 +953,7 @@
         setIsDownloadingCloud(true);
         try {
            const { getDocs, collection } = await loadFirebase('firebase-firestore.js');
-           const appId = typeof __app_id !== 'undefined' ? __app_id : GITHUB_FIREBASE_CONFIG.appId || 'default-app-id';
+           const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
            
            const chunksRef = collection(db, 'artifacts', appId, 'users', user.uid, 'designs', design.id, 'chunks');
            const snapshot = await getDocs(chunksRef);
@@ -851,7 +980,7 @@
         if (!user || !db) return;
         try {
             const { doc, deleteDoc, collection } = await loadFirebase('firebase-firestore.js');
-            const appId = typeof __app_id !== 'undefined' ? __app_id : GITHUB_FIREBASE_CONFIG.appId || 'default-app-id';
+            const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
             const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'designs', design.id);
             
             for(let i=0; i<design.chunksCount; i++) {
@@ -861,6 +990,27 @@
         } catch(e) { 
             console.error(e); 
         }
+      };
+
+      const handleCopyScript = () => {
+        const textArea = document.createElement("textarea");
+        textArea.value = SCRIPT_TEXT;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          setSaveStatus("Script Copied!");
+          setTimeout(() => setSaveStatus(""), 3000);
+        } catch (err) {
+          console.error('Unable to copy', err);
+          setSaveStatus("Copy failed");
+          setTimeout(() => setSaveStatus(""), 3000);
+        }
+        textArea.remove();
       };
 
       const handleDragEvent = (type, e) => { e.preventDefault(); if (type === 'enter') dragCounter.current++; else if (type === 'leave') dragCounter.current--; else if (type === 'drop') { dragCounter.current = 0; setIsDragOver(false); if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]); return; } setIsDragOver(dragCounter.current > 0); };
@@ -1025,6 +1175,7 @@
                     </div>
                   )}
                   <input 
+                    ref={pinInputRef}
                     type="url" 
                     placeholder="https://pin.it/..." 
                     required
@@ -1048,7 +1199,7 @@
             </div>
           )}
 
-          {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} isInverted={isInverted} onConfirm={(t, p, newRaw) => { setTransform(t); setPaperSize(p); if (newRaw) { setRawImage(newRaw); const img = new Image(); img.onload = () => setProcessedImage(img); img.src = newRaw; } setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
+          {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} setIsBgRemoved={setIsBgRemoved} isInverted={isInverted} setIsInverted={setIsInverted} onConfirm={(t, p, newRaw) => { setTransform(t); setPaperSize(p); if (newRaw) { setRawImage(newRaw); const img = new Image(); img.onload = () => setProcessedImage(img); img.src = newRaw; } setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
           
           <div className="flex-1 w-full relative flex flex-col items-center justify-center bg-[#f8fafc] overflow-hidden">
              {/* Cloud Designs Modal overlaying the canvas */}
@@ -1142,18 +1293,21 @@
                 </div>
               </div>
               <div className="flex items-center gap-2 w-full overflow-x-auto hide-scrollbar">
-                <div className="flex h-10 border rounded-xl bg-white overflow-hidden flex-1 max-w-[200px] shrink-0">
-                   <button onClick={() => handleSnap('left')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapLeft} size={14} /></button>
-                   <button onClick={() => handleSnap('right')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapRight} size={14} /></button>
-                   <button onClick={() => handleSnap('up')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapUp} size={14} /></button>
-                   <button onClick={() => handleSnap('down')} className="flex-1 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.SnapDown} size={14} /></button>
-                </div>
-                <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 shrink-0 ${isBgRemoved ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Remove BG"><Icon path={Paths.Eraser} size={16} /></button>
-                <button onClick={() => setIsInverted(!isInverted)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 shrink-0 ${isInverted ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Invert Colors"><Icon path={Paths.Invert} size={16} /></button>
-                <button onClick={() => setIsStudioOpen(true)} className="flex-1 min-w-[40px] h-10 border rounded-xl bg-white flex items-center justify-center duration-100 shrink-0" title="Edit Design"><Icon path={Paths.Edit} size={16} /></button>
+                <button onClick={() => setIsStudioOpen(true)} className="flex-[2] min-w-[80px] h-10 border rounded-xl bg-white flex items-center justify-center duration-100 shrink-0 gap-2" title="Edit Design">
+                  <Icon path={Paths.Edit} size={16} />
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-800 hidden sm:inline">Edit Design</span>
+                </button>
                 <div className="h-6 w-px bg-slate-200 shrink-0 mx-1"></div>
-                <button onClick={() => setIsCloudModalOpen(!isCloudModalOpen)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 ${isCloudModalOpen ? 'border-red-200 bg-red-50 text-red-600' : 'border-blue-200 bg-blue-50 text-blue-600'}`} title={isCloudModalOpen ? "Close Cloud Backup" : "Cloud Backup"}><Icon path={isCloudModalOpen ? Paths.Close : Paths.Cloud} size={16} /></button>
-                <button onClick={downloadMockup} className="flex-1 min-w-[40px] h-10 bg-black text-white rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0" title="Download"><Icon path={Paths.Download} size={16} /></button>
+                <button onClick={() => setIsCloudModalOpen(!isCloudModalOpen)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 ${isCloudModalOpen ? 'border-red-200 bg-red-50 text-red-600' : 'border-blue-200 bg-blue-50 text-blue-600'}`} title={isCloudModalOpen ? "Close Cloud Backup" : "Cloud Backup"}>
+                  <Icon path={isCloudModalOpen ? Paths.Close : Paths.Cloud} size={16} />
+                </button>
+                <button onClick={handleCopyScript} className="flex-1 min-w-[40px] h-10 border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0" title="Copy Description Script">
+                  <span className="font-black font-roboto-bold text-[15px]">S</span>
+                </button>
+                <button onClick={downloadMockup} className="flex-[2] min-w-[80px] h-10 bg-black text-white rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 gap-2" title="Download">
+                  <Icon path={Paths.Download} size={16} />
+                  <span className="text-[11px] font-black uppercase tracking-widest text-white hidden sm:inline">Export</span>
+                </button>
               </div>
             </div>
           </div>
