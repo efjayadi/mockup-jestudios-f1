@@ -850,62 +850,7 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
 
       // Download and save logic
       const downloadMockup = async () => {
-        // --- 1. Save Print File to Cloud Backup ---
-        if (uploadedImage && user && db) {
-          try {
-            const imageHash = generateHash(uploadedImage);
-            const designId = `design_${imageHash}`;
-
-            if (!cloudDesigns.some(d => d.id === designId)) {
-              setSaveStatus("Backing up print file...");
-              const { doc, setDoc, collection } = await loadFirebase('firebase-firestore.js');
-              const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
-              
-              const designsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'designs');
-              const newDocRef = doc(designsRef, designId);
-
-              // Chunk base64 string to bypass 1MB firestore limit (~800KB chunks)
-              const CHUNK_SIZE = 800000;
-              const chunks = [];
-              for (let i = 0; i < uploadedImage.length; i += CHUNK_SIZE) {
-                chunks.push(uploadedImage.slice(i, i + CHUNK_SIZE));
-              }
-
-              // Create a small thumbnail for the UI
-              const thumbCanvas = document.createElement('canvas');
-              thumbCanvas.width = 150;
-              const img = new Image();
-              await new Promise(r => { img.onload = r; img.src = uploadedImage; });
-              thumbCanvas.height = (img.naturalHeight / img.naturalWidth) * 150;
-              const tCtx = thumbCanvas.getContext('2d');
-              tCtx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height);
-              const thumbnail = thumbCanvas.toDataURL('image/png');
-
-              await setDoc(newDocRef, {
-                id: designId,
-                createdAt: Date.now(),
-                chunksCount: chunks.length,
-                thumbnail: thumbnail,
-                paperSize: paperSize
-              });
-
-              // Upload chunks
-              for (let i = 0; i < chunks.length; i++) {
-                const chunkRef = doc(collection(newDocRef, 'chunks'), `chunk_${i}`);
-                await setDoc(chunkRef, { index: i, data: chunks[i] });
-              }
-              
-              setSaveStatus("Saved to Cloud!");
-              setTimeout(() => setSaveStatus(""), 3000);
-            }
-          } catch (error) {
-            console.error("Cloud save failed:", error);
-            setSaveStatus("Cloud backup failed");
-            setTimeout(() => setSaveStatus(""), 3000);
-          }
-        }
-
-        // --- 2. Local Download Mockup Generation ---
+        // --- 1. Local Download Mockup Generation (PRIORITY) ---
         for (const type of DOWNLOAD_VIEWS) {
           if (type === 'back' && !selectedDriver) continue;
           const canvas = document.createElement('canvas'); canvas.width = CANVAS_SIZE; canvas.height = CANVAS_SIZE;
@@ -960,6 +905,61 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
           }
           const link = document.createElement('a'); link.download = `Jestudios_${type}_${Date.now()}.png`; link.href = canvas.toDataURL('image/png'); link.click();
           await new Promise(r => setTimeout(r, 400));
+        }
+
+        // --- 2. Save Print File to Cloud Backup (BACKGROUND) ---
+        if (uploadedImage && user && db) {
+          try {
+            const imageHash = generateHash(uploadedImage);
+            const designId = `design_${imageHash}`;
+
+            if (!cloudDesigns.some(d => d.id === designId)) {
+              setSaveStatus("Backing up print file...");
+              const { doc, setDoc, collection } = await loadFirebase('firebase-firestore.js');
+              const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
+              
+              const designsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'designs');
+              const newDocRef = doc(designsRef, designId);
+
+              // Chunk base64 string to bypass 1MB firestore limit (~800KB chunks)
+              const CHUNK_SIZE = 800000;
+              const chunks = [];
+              for (let i = 0; i < uploadedImage.length; i += CHUNK_SIZE) {
+                chunks.push(uploadedImage.slice(i, i + CHUNK_SIZE));
+              }
+
+              // Create a small thumbnail for the UI
+              const thumbCanvas = document.createElement('canvas');
+              thumbCanvas.width = 150;
+              const img = new Image();
+              await new Promise(r => { img.onload = r; img.src = uploadedImage; });
+              thumbCanvas.height = (img.naturalHeight / img.naturalWidth) * 150;
+              const tCtx = thumbCanvas.getContext('2d');
+              tCtx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height);
+              const thumbnail = thumbCanvas.toDataURL('image/png');
+
+              await setDoc(newDocRef, {
+                id: designId,
+                createdAt: Date.now(),
+                chunksCount: chunks.length,
+                thumbnail: thumbnail,
+                paperSize: paperSize
+              });
+
+              // Upload chunks
+              for (let i = 0; i < chunks.length; i++) {
+                const chunkRef = doc(collection(newDocRef, 'chunks'), `chunk_${i}`);
+                await setDoc(chunkRef, { index: i, data: chunks[i] });
+              }
+              
+              setSaveStatus("Saved to Cloud!");
+              setTimeout(() => setSaveStatus(""), 3000);
+            }
+          } catch (error) {
+            console.error("Cloud save failed:", error);
+            setSaveStatus("Cloud backup failed");
+            setTimeout(() => setSaveStatus(""), 3000);
+          }
         }
       };
 
