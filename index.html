@@ -200,7 +200,16 @@
       const counts = {}; samples.forEach(c => { const k = `${Math.floor(c.r/8)},${Math.floor(c.g/8)},${Math.floor(c.b/8)}`; counts[k] = (counts[k]||0)+1; });
       const topColorKey = Object.keys(counts).length > 0 ? Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b) : "255,255,255";
       const [bgR, bgG, bgB] = topColorKey.split(',').map(v => v * 8);
-      for (let i = 0; i < data.length; i += 4) { const d = (Math.abs(data[i]-bgR) + Math.abs(data[i+1]-bgG) + Math.abs(data[i+2]-bgB)) / 3; if (d < 35) data[i+3] = 0; else if (d < 55) data[i+3] = ((d-35)/20)*255; }
+      for (let i = 0; i < data.length; i += 4) { 
+        const d = (Math.abs(data[i]-bgR) + Math.abs(data[i+1]-bgG) + Math.abs(data[i+2]-bgB)) / 3; 
+        
+        // DTF Fix: Use a hard binary threshold to prevent semi-transparent pixels printing a solid white base
+        if (d < 45) {
+          data[i+3] = 0;    // Fully transparent
+        } else {
+          data[i+3] = 255; // Fully opaque
+        }
+      }
       tCtx.putImageData(imageData, 0, 0); return new Promise(r => { const o = new Image(); o.onload = () => r(o); o.src = temp.toDataURL(); });
     };
 
@@ -345,6 +354,15 @@
         fCtx.drawImage(active, 0, 0);
         fCtx.globalCompositeOperation = 'destination-out';
         fCtx.drawImage(eraserMaskRef.current, 0, 0);
+        
+        // DTF Fix: Binarize the alpha channel to strip out soft anti-aliased edges left by the eraser brush
+        const finalImageData = fCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height);
+        const fd = finalImageData.data;
+        for (let i = 0; i < fd.length; i += 4) {
+          fd[i+3] = fd[i+3] < 128 ? 0 : 255;
+        }
+        fCtx.putImageData(finalImageData, 0, 0);
+        
         onConfirm(transform, paper, finalCanvas.toDataURL());
       };
 
