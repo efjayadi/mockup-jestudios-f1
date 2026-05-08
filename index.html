@@ -208,31 +208,58 @@
       // Pass 1: Initial color distance mask
       for (let i = 0; i < data.length; i += 4) { 
         const d = (Math.abs(data[i]-bgR) + Math.abs(data[i+1]-bgG) + Math.abs(data[i+2]-bgB)) / 3; 
-        rawAlpha[i/4] = d < 30 ? 0 : (d < 80 ? ((d - 30) / 50) * 255 : 255);
+        rawAlpha[i/4] = d < 35 ? 0 : (d < 55 ? ((d - 35) / 20) * 255 : 255);
       }
 
-      // Pass 2: Spatial Horizontal Blur (Feathering to fix stair-steps)
-      const blurX = new Uint8Array(w * h);
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const idx = y * w + x;
-          if (x > 1 && x < w - 2) blurX[idx] = (rawAlpha[idx-2] + rawAlpha[idx-1]*2 + rawAlpha[idx]*2 + rawAlpha[idx+1]*2 + rawAlpha[idx+2]) / 8;
-          else blurX[idx] = rawAlpha[idx];
+      // Fast Rolling Box Blur for Vector-like Curve Smoothing
+      const blurAlpha = (input, width, height, radius) => {
+        const out1 = new Uint8Array(width * height);
+        const out2 = new Uint8Array(width * height);
+        
+        // Horizontal pass
+        for (let y = 0; y < height; y++) {
+          let sum = 0, count = 0;
+          for (let i = -radius; i <= radius; i++) {
+            if (i >= 0 && i < width) { sum += input[y * width + i]; count++; }
+          }
+          out1[y * width] = sum / count;
+          for (let x = 1; x < width; x++) {
+            if (x + radius < width) { sum += input[y * width + x + radius]; count++; }
+            if (x - radius - 1 >= 0) { sum -= input[y * width + x - radius - 1]; count--; }
+            out1[y * width + x] = sum / count;
+          }
         }
-      }
+        
+        // Vertical pass
+        for (let x = 0; x < width; x++) {
+          let sum = 0, count = 0;
+          for (let i = -radius; i <= radius; i++) {
+            if (i >= 0 && i < height) { sum += out1[i * width + x]; count++; }
+          }
+          out2[x] = sum / count;
+          for (let y = 1; y < height; y++) {
+            if (y + radius < height) { sum += out1[(y + radius) * width + x]; count++; }
+            if (y - radius - 1 >= 0) { sum -= out1[(y - radius - 1) * width + x]; count--; }
+            out2[y * width + x] = sum / count;
+          }
+        }
+        return out2;
+      };
 
-      // Pass 3: Spatial Vertical Blur & DTF Thresholding
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const idx = y * w + x;
-          let a = blurX[idx];
-          if (y > 1 && y < h - 2) a = (blurX[idx-w*2] + blurX[idx-w]*2 + blurX[idx]*2 + blurX[idx+w]*2 + blurX[idx+w*2]) / 8;
-          
-          // DTF Fix: Tighten the feathered edge. Kills halos but preserves a smooth 1-2px anti-aliased edge.
-          if (a < 45) data[idx*4+3] = 0;
-          else if (a > 210) data[idx*4+3] = 255;
-          else data[idx*4+3] = Math.round(((a - 45) / 165) * 255);
-        }
+      // Apply heavy smoothing (simulates reducing nodes / bezier curve fitting)
+      const radius = Math.max(3, Math.floor(w / 250)); // Dynamic curve smoothing radius
+      let smoothedAlpha = blurAlpha(rawAlpha, w, h, radius);
+      smoothedAlpha = blurAlpha(smoothedAlpha, w, h, radius); // 2nd pass for organic Gaussian shape
+
+      // Pass 3: Strict Thresholding with 1-2px Anti-Aliasing (DTF Safe)
+      for (let i = 0; i < smoothedAlpha.length; i++) {
+        let a = smoothedAlpha[i];
+        
+        // This thresholding cuts precisely at the mid-point of the organic curve blur
+        // to create the "vector smooth" edge, entirely removing jagged node steps.
+        if (a < 115) data[i*4+3] = 0;
+        else if (a > 140) data[i*4+3] = 255;
+        else data[i*4+3] = Math.round(((a - 115) / 25) * 255);
       }
 
       tCtx.putImageData(imageData, 0, 0); return new Promise(r => { const o = new Image(); o.onload = () => r(o); o.src = temp.toDataURL(); });
