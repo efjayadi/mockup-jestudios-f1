@@ -56,12 +56,53 @@
     
     /* Ensure touch-action is none to allow custom touch handling on canvas */
     .touch-none { touch-action: none; }
+
+    /* Loader Animation */
+    .line-loader {
+      width: 120px;
+      height: 4px;
+      background: #e2e8f0;
+      border-radius: 99px;
+      overflow: hidden;
+      position: relative;
+    }
+    .line-loader::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 40%;
+      background: #2563eb;
+      border-radius: 99px;
+      animation: slide-line 0.6s ease-in-out infinite;
+    }
+    @keyframes slide-line {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(250%); }
+    }
   </style>
 </head>
 <body class="antialiased overflow-hidden">
   <div id="root"></div>
 
   <script type="text/babel">
+    // ============================================================================
+    // GITHUB DEPLOYMENT - FIREBASE CONFIG
+    // When hosting on GitHub, replace these with your Firebase project config.
+    // ============================================================================
+    const GITHUB_FIREBASE_CONFIG = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    // Helper to prevent Babel from transpiling dynamic imports into require()
+    const loadFirebase = async (module) => await new Function(`return import("https://www.gstatic.com/firebasejs/11.6.1/${module}")`)();
+
     const { useState, useRef, useEffect, useCallback } = React;
 
     const PWAInstallPrompt = () => {
@@ -83,7 +124,6 @@
 
       const handleInstall = async () => {
         if (isIOS) { 
-          // Replaced alert with custom UI state to prevent iframe blocking
           setDeferredPrompt('ios-instructions'); 
           return; 
         }
@@ -185,10 +225,11 @@
       Block: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M4.929 4.929l14.142 14.142",
       SnapLeft: "M15 18l-6-6 6-6",
       SnapRight: "M9 18l6-6-6-6",
-      // Swapped SVG strings so the visual icons match the user's perception
       SnapUp: "M18 9l-6 6-6-6",
       SnapDown: "M18 15l-6-6-6 6",
-      Link: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71m-2.83 2.83a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+      Link: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71m-2.83 2.83a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71",
+      Cloud: "M17.5 19C19.985 19 22 16.985 22 14.5C22 12.15 20.215 10.22 17.925 10.025C17.45 7.155 14.965 5 12 5C8.685 5 6 7.685 6 11C6 11.135 6.005 11.27 6.02 11.405C3.765 11.585 2 13.485 2 15.835C2 18.135 3.865 20 6.165 20H17.5V19Z",
+      Trash: "M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"
     };
 
     const createProcessedImage = async (img) => {
@@ -216,7 +257,6 @@
         const out1 = new Uint8Array(width * height);
         const out2 = new Uint8Array(width * height);
         
-        // Horizontal pass
         for (let y = 0; y < height; y++) {
           let sum = 0, count = 0;
           for (let i = -radius; i <= radius; i++) {
@@ -230,7 +270,6 @@
           }
         }
         
-        // Vertical pass
         for (let x = 0; x < width; x++) {
           let sum = 0, count = 0;
           for (let i = -radius; i <= radius; i++) {
@@ -246,17 +285,13 @@
         return out2;
       };
 
-      // Apply heavy smoothing (simulates reducing nodes / bezier curve fitting)
-      const radius = Math.max(3, Math.floor(w / 250)); // Dynamic curve smoothing radius
+      const radius = Math.max(3, Math.floor(w / 250)); 
       let smoothedAlpha = blurAlpha(rawAlpha, w, h, radius);
-      smoothedAlpha = blurAlpha(smoothedAlpha, w, h, radius); // 2nd pass for organic Gaussian shape
+      smoothedAlpha = blurAlpha(smoothedAlpha, w, h, radius); 
 
       // Pass 3: Strict Thresholding with 1-2px Anti-Aliasing (DTF Safe)
       for (let i = 0; i < smoothedAlpha.length; i++) {
         let a = smoothedAlpha[i];
-        
-        // This thresholding cuts precisely at the mid-point of the organic curve blur
-        // to create the "vector smooth" edge, entirely removing jagged node steps.
         if (a < 115) data[i*4+3] = 0;
         else if (a > 140) data[i*4+3] = 255;
         else data[i*4+3] = Math.round(((a - 115) / 25) * 255);
@@ -349,7 +384,6 @@
       const handleInteraction = (type, e) => {
         if (!canvasRef.current || !images.original) return;
         
-        // Critical for preventing ghost scrolls and browser navigation
         if (e.cancelable) e.preventDefault();
         if (e.stopPropagation) e.stopPropagation();
 
@@ -459,6 +493,15 @@
     }
 
     function App() {
+      // Firebase State
+      const [user, setUser] = useState(null);
+      const [db, setDb] = useState(null);
+      const [cloudDesigns, setCloudDesigns] = useState([]);
+      const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
+      const [saveStatus, setSaveStatus] = useState("");
+      const [isDownloadingCloud, setIsDownloadingCloud] = useState(false);
+
+      // App State
       const [garmentColor, setGarmentColor] = useState('black');
       const [selectedDriver, setSelectedDriver] = useState(null);
       const [uploadedImage, setUploadedImage] = useState(null); 
@@ -472,13 +515,13 @@
       const [paperSize, setPaperSize] = useState("A4");
       const [editorScale, setEditorScale] = useState(1);
       const [activeIndex, setActiveIndex] = useState(0);
-      const [isDriversExpanded, setIsDriversExpanded] = useState(false);
       const [isDragOver, setIsDragOver] = useState(false);
       const [isPinModalOpen, setIsPinModalOpen] = useState(false);
       const [pinUrl, setPinUrl] = useState("");
       const [isFetchingPin, setIsFetchingPin] = useState(false);
       const [pinError, setPinError] = useState("");
       const [showUploadMenu, setShowUploadMenu] = useState(true);
+      const [isProcessingFile, setIsProcessingFile] = useState(false);
 
       const dragCounter = useRef(0);
       const fileInputRef = useRef(null);
@@ -488,6 +531,72 @@
 
       const VIEWS = ['front', 'back', 'detail'];
       const DOWNLOAD_VIEWS = ['front', 'back', 'detail', 'fabric', 'size'];
+
+      // Firebase Initialization
+      useEffect(() => {
+        let unsubscribeAuth = () => {};
+        const initFirebase = async () => {
+          try {
+            const { initializeApp } = await loadFirebase('firebase-app.js');
+            const { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = await loadFirebase('firebase-auth.js');
+            const { getFirestore } = await loadFirebase('firebase-firestore.js');
+
+            const firebaseConfig = typeof __firebase_config !== 'undefined' 
+              ? JSON.parse(__firebase_config) 
+              : GITHUB_FIREBASE_CONFIG;
+              
+            // Basic guard for GitHub fallback usage before it's configured
+            if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "YOUR_API_KEY") {
+               console.warn("Firebase config missing. Cloud features will be disabled.");
+               return;
+            }
+
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const dbInstance = getFirestore(app);
+            setDb(dbInstance);
+
+            const initAuth = async () => {
+              if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+              } else {
+                await signInAnonymously(auth);
+              }
+            };
+            await initAuth();
+
+            unsubscribeAuth = onAuthStateChanged(auth, setUser);
+          } catch (err) {
+            console.error("Firebase init error:", err);
+          }
+        };
+        initFirebase();
+        return () => unsubscribeAuth();
+      }, []);
+
+      // Realtime Cloud Designs Listener
+      useEffect(() => {
+        if (!user || !db) return;
+        let unsubscribeSnapshot = null;
+        
+        const initSnapshot = async () => {
+          const { collection, onSnapshot } = await loadFirebase('firebase-firestore.js');
+          const appId = typeof __app_id !== 'undefined' ? __app_id : GITHUB_FIREBASE_CONFIG.appId || 'default-app-id';
+          const designsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'designs');
+          
+          unsubscribeSnapshot = onSnapshot(designsRef, (snapshot) => {
+            const designs = [];
+            snapshot.forEach(doc => designs.push(doc.data()));
+            designs.sort((a, b) => b.createdAt - a.createdAt);
+            setCloudDesigns(designs);
+          }, (error) => {
+            console.error("Error listening to designs:", error);
+          });
+        };
+        initSnapshot();
+        
+        return () => { if (unsubscribeSnapshot) unsubscribeSnapshot(); };
+      }, [user, db]);
 
       useEffect(() => {
         const updateScale = () => { if (carouselRef.current) { const canvas = carouselRef.current.querySelector('.canvas-wrapper'); if (canvas) setEditorScale(canvas.getBoundingClientRect().height / CANVAS_SIZE); } };
@@ -552,22 +661,25 @@
       const processFile = (file) => {
         if (!file || !file.type.startsWith('image/')) return;
         setShowUploadMenu(false);
+        setIsProcessingFile(true);
         const reader = new FileReader(); reader.onload = async (ev) => {
           const img = new Image(); img.onload = async () => {
-            setRawImage(ev.target.result); const proc = await createProcessedImage(img); setProcessedImage(proc);
-            const bounds = detectContentBounds(proc); const targetSize = (bounds.w > bounds.h) ? { w: A4.w, h: A4.h, name: "A4" } : { w: A3.w, h: A3.h, name: "A3" };
-            const sW = targetSize.w / bounds.w; const sH = targetSize.h / bounds.h; const initialScale = Math.min(sW, sH);
-            
-            // Set the default Y transformation to match the "Snap Up" behavior to fit the top area
-            const defaultY = (img.height * initialScale / 2) - bounds.y * initialScale;
-            
-            setPaperSize(targetSize.name); 
-            setTransform({ 
-              x: targetSize.w / 2 - (bounds.x + bounds.w / 2 - img.width / 2) * initialScale, 
-              y: defaultY, 
-              scale: initialScale 
-            });
-            setFitMode(sW < sH ? 'width' : 'height'); setIsBgRemoved(true); setIsInverted(false);
+            setTimeout(async () => {
+              setRawImage(ev.target.result); const proc = await createProcessedImage(img); setProcessedImage(proc);
+              const bounds = detectContentBounds(proc); const targetSize = (bounds.w > bounds.h) ? { w: A4.w, h: A4.h, name: "A4" } : { w: A3.w, h: A3.h, name: "A3" };
+              const sW = targetSize.w / bounds.w; const sH = targetSize.h / bounds.h; const initialScale = Math.min(sW, sH);
+              
+              const defaultY = (img.height * initialScale / 2) - bounds.y * initialScale;
+              
+              setPaperSize(targetSize.name); 
+              setTransform({ 
+                x: targetSize.w / 2 - (bounds.x + bounds.w / 2 - img.width / 2) * initialScale, 
+                y: defaultY, 
+                scale: initialScale 
+              });
+              setFitMode(sW < sH ? 'width' : 'height'); setIsBgRemoved(true); setIsInverted(false);
+              setIsProcessingFile(false);
+            }, 50);
           };
           img.src = ev.target.result;
         };
@@ -596,7 +708,60 @@
         else if (rawImage) { const tempImg = new Image(); tempImg.onload = () => applySnap(tempImg); tempImg.src = rawImage; }
       };
 
+      // Download and save logic
       const downloadMockup = async () => {
+        // --- 1. Save Print File to Cloud Backup ---
+        if (uploadedImage && user && db) {
+          setSaveStatus("Backing up print file...");
+          try {
+            const { doc, setDoc, collection } = await loadFirebase('firebase-firestore.js');
+            const appId = typeof __app_id !== 'undefined' ? __app_id : GITHUB_FIREBASE_CONFIG.appId || 'default-app-id';
+            
+            const designId = `design_${Date.now()}`;
+            const designsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'designs');
+            const newDocRef = doc(designsRef, designId);
+
+            // Chunk base64 string to bypass 1MB firestore limit (~800KB chunks)
+            const CHUNK_SIZE = 800000;
+            const chunks = [];
+            for (let i = 0; i < uploadedImage.length; i += CHUNK_SIZE) {
+              chunks.push(uploadedImage.slice(i, i + CHUNK_SIZE));
+            }
+
+            // Create a small thumbnail for the UI
+            const thumbCanvas = document.createElement('canvas');
+            thumbCanvas.width = 150;
+            const img = new Image();
+            await new Promise(r => { img.onload = r; img.src = uploadedImage; });
+            thumbCanvas.height = (img.naturalHeight / img.naturalWidth) * 150;
+            const tCtx = thumbCanvas.getContext('2d');
+            tCtx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height);
+            const thumbnail = thumbCanvas.toDataURL('image/png');
+
+            await setDoc(newDocRef, {
+              id: designId,
+              createdAt: Date.now(),
+              chunksCount: chunks.length,
+              thumbnail: thumbnail,
+              paperSize: paperSize
+            });
+
+            // Upload chunks
+            for (let i = 0; i < chunks.length; i++) {
+              const chunkRef = doc(collection(newDocRef, 'chunks'), `chunk_${i}`);
+              await setDoc(chunkRef, { index: i, data: chunks[i] });
+            }
+            
+            setSaveStatus("Saved to Cloud!");
+            setTimeout(() => setSaveStatus(""), 3000);
+          } catch (error) {
+            console.error("Cloud save failed:", error);
+            setSaveStatus("Cloud backup failed");
+            setTimeout(() => setSaveStatus(""), 3000);
+          }
+        }
+
+        // --- 2. Local Download Mockup Generation ---
         for (const type of DOWNLOAD_VIEWS) {
           if (type === 'back' && !selectedDriver) continue;
           const canvas = document.createElement('canvas'); canvas.width = CANVAS_SIZE; canvas.height = CANVAS_SIZE;
@@ -613,13 +778,87 @@
           }
           if (uploadedImage && (type === 'front' || type === 'back' || type === 'detail')) {
             const aImg = new Image(); await new Promise(r => { aImg.onload = r; aImg.src = uploadedImage; });
-            ctx.globalAlpha = 0.9;
-            ctx.globalCompositeOperation = garmentColor === 'white' ? 'multiply' : 'screen';
-            ctx.drawImage(aImg, pos.l, pos.t, pos.w, (aImg.naturalHeight/aImg.naturalWidth)*pos.w);
-            ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1.0;
+            const aw = pos.w;
+            const ah = (aImg.naturalHeight/aImg.naturalWidth)*pos.w;
+            
+            // Create a realistic fabric texture overlay using off-screen canvas
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = aw;
+            tempCanvas.height = ah;
+            const tc = tempCanvas.getContext('2d');
+            
+            // 1. Base Artwork (Slight transparency blends it into the fabric base)
+            tc.globalAlpha = 0.94;
+            tc.drawImage(aImg, 0, 0, aw, ah);
+            
+            // 2. Fabric Shadows (Multiply maps the dark folds over the design)
+            tc.globalCompositeOperation = 'multiply';
+            // White shirts have distinct grey shadows, black shirts need less multiply to avoid turning the design black
+            tc.globalAlpha = garmentColor === 'black' ? 0.3 : 0.4;
+            tc.drawImage(gImg, -pos.l, -pos.t, CANVAS_SIZE, CANVAS_SIZE);
+            
+            // 3. Fabric Highlights (Screen maps the specular lighting over the design)
+            tc.globalCompositeOperation = 'screen';
+            // Black shirts show their 3D shape almost entirely through bright lighting/sheen
+            tc.globalAlpha = garmentColor === 'black' ? 0.4 : 0.15;
+            tc.drawImage(gImg, -pos.l, -pos.t, CANVAS_SIZE, CANVAS_SIZE);
+            
+            // 4. Masking: Trim away any shadows/highlights that spilled outside the artwork
+            tc.globalCompositeOperation = 'destination-in';
+            tc.globalAlpha = 1.0;
+            tc.drawImage(aImg, 0, 0, aw, ah);
+            
+            // Draw finalized realistic artwork onto the main mockup
+            ctx.globalCompositeOperation = 'source-over'; 
+            ctx.globalAlpha = 1.0;
+            ctx.drawImage(tempCanvas, pos.l, pos.t, aw, ah);
           }
           const link = document.createElement('a'); link.download = `Jestudios_${type}_${Date.now()}.png`; link.href = canvas.toDataURL('image/png'); link.click();
           await new Promise(r => setTimeout(r, 400));
+        }
+      };
+
+      const downloadCloudDesign = async (design) => {
+        if (!user || !db) return;
+        setIsDownloadingCloud(true);
+        try {
+           const { getDocs, collection } = await loadFirebase('firebase-firestore.js');
+           const appId = typeof __app_id !== 'undefined' ? __app_id : GITHUB_FIREBASE_CONFIG.appId || 'default-app-id';
+           
+           const chunksRef = collection(db, 'artifacts', appId, 'users', user.uid, 'designs', design.id, 'chunks');
+           const snapshot = await getDocs(chunksRef);
+           
+           const chunks = [];
+           snapshot.forEach(doc => chunks.push(doc.data()));
+           chunks.sort((a, b) => a.index - b.index);
+           
+           const fullDataUrl = chunks.map(c => c.data).join('');
+           
+           const link = document.createElement('a');
+           link.download = `Print_File_${design.paperSize}_${design.id}.png`;
+           link.href = fullDataUrl;
+           link.click();
+        } catch (e) {
+           console.error("Cloud download failed", e);
+           alert("Failed to download image from cloud.");
+        } finally {
+           setIsDownloadingCloud(false);
+        }
+      };
+
+      const deleteCloudDesign = async (design) => {
+        if (!user || !db) return;
+        try {
+            const { doc, deleteDoc, collection } = await loadFirebase('firebase-firestore.js');
+            const appId = typeof __app_id !== 'undefined' ? __app_id : GITHUB_FIREBASE_CONFIG.appId || 'default-app-id';
+            const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'designs', design.id);
+            
+            for(let i=0; i<design.chunksCount; i++) {
+                await deleteDoc(doc(collection(docRef, 'chunks'), `chunk_${i}`));
+            }
+            await deleteDoc(docRef);
+        } catch(e) { 
+            console.error(e); 
         }
       };
 
@@ -633,11 +872,9 @@
         try {
           let targetImgUrl = pinUrl.trim();
           
-          // Scrape Pinterest HTML for the true image URL
           if (targetImgUrl.includes('pinterest.') || targetImgUrl.includes('pin.it')) {
             let html = "";
             try {
-              // codetabs proxy is preferred here because it automatically follows 'pin.it' redirects
               const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetImgUrl)}`);
               if (!res.ok) throw new Error("Primary proxy failed");
               html = await res.text();
@@ -649,8 +886,6 @@
             }
             
             let extractedUrl = null;
-            
-            // 1. Look for OpenGraph image tags first
             const ogMatch = html.match(/<meta[^>]*(?:property|name)="og:image"[^>]*content="([^"]+)"/i) || 
                             html.match(/content="([^"]+)"[^>]*(?:property|name)="og:image"/i) ||
                             html.match(/<link[^>]*rel="image_src"[^>]*href="([^"]+)"/i);
@@ -658,8 +893,6 @@
             if (ogMatch && ogMatch[1] && ogMatch[1].includes('pinimg.com')) {
               extractedUrl = ogMatch[1];
             } else {
-              // 2. Fallback: extract image URLs embedded inside JSON blobs or scripts (common in Pinterest SPA)
-              // We check for both unescaped (/) and JSON-escaped (\/) forward slashes
               const origMatch = html.match(/https:\\?\/\\?\/i\.pinimg\.com\\?\/originals\\?\/[^"'\s\\]+\.(?:jpg|jpeg|png|webp)/i);
               const highResMatch = html.match(/https:\\?\/\\?\/i\.pinimg\.com\\?\/736x\\?\/[^"'\s\\]+\.(?:jpg|jpeg|png|webp)/i);
               const anyPinimgMatch = html.match(/https:\\?\/\\?\/i\.pinimg\.com\\?\/[a-z0-9_]+\\?\/[^"'\s\\]+\.(?:jpg|jpeg|png|webp)/i);
@@ -670,14 +903,12 @@
             }
             
             if (extractedUrl) {
-              // Clean up any unicode or JSON-escaped slashes
               targetImgUrl = extractedUrl.replace(/\\u002F/g, '/').replace(/\\\//g, '/');
             } else {
               throw new Error("No image found. Ensure it's a valid public Pin.");
             }
           }
 
-          // Fetch the actual image using proxy to bypass CORS restrictions
           let blob;
           try {
             const imgRes = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetImgUrl)}`);
@@ -689,7 +920,6 @@
             blob = await imgRes.blob();
           }
           
-          // Convert Blob to File and route through existing upload handler
           const file = new File([blob], "imported_image.jpg", { type: blob.type || "image/jpeg" });
           
           processFile(file);
@@ -716,7 +946,42 @@
               <div style={{ width: CANVAS_SIZE, height: CANVAS_SIZE, transform: `scale(${editorScale})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
                 <img src={src} className="w-full h-full absolute inset-0 object-cover pointer-events-none" onError={(e) => { e.target.style.display='none'; }}/>
                 {type === 'front' && selectedDriver && <img src={DRIVERS.find(d=>d.id===selectedDriver).image} className="absolute pointer-events-none" style={{ width: 650, left: -85, bottom: '-130%', zIndex: 5 }} onError={(e) => { e.target.style.display='none'; }} />}
-                {showArt && <div className="absolute" style={{ left: pos.l, top: pos.t, width: pos.w, zIndex: 10 }}><canvas ref={el => { if (el && uploadedImage) { const c = el.getContext('2d'); const i = new Image(); i.onload = () => { el.width = pos.w; el.height = (i.naturalHeight/i.naturalWidth)*pos.w; c.globalAlpha = 0.9; c.globalCompositeOperation = garmentColor === 'white' ? 'multiply' : 'screen'; c.drawImage(i, 0, 0, el.width, el.height); }; i.src = uploadedImage; } }} className="w-full pointer-events-none" /></div>}
+                {showArt && <div className="absolute" style={{ left: pos.l, top: pos.t, width: pos.w, zIndex: 10 }}><canvas ref={el => { 
+                  if (el && uploadedImage) { 
+                    const c = el.getContext('2d'); 
+                    const i = new Image(); 
+                    i.onload = () => { 
+                      el.width = pos.w; 
+                      const ah = (i.naturalHeight/i.naturalWidth)*pos.w;
+                      el.height = ah; 
+                      
+                      const gImg = new Image();
+                      gImg.onload = () => {
+                         // Base Artwork
+                         c.globalAlpha = 0.94; 
+                         c.globalCompositeOperation = 'source-over'; 
+                         c.drawImage(i, 0, 0, pos.w, ah); 
+                         
+                         // Fabric Shadows (Multiply)
+                         c.globalCompositeOperation = 'multiply';
+                         c.globalAlpha = garmentColor === 'black' ? 0.3 : 0.4;
+                         c.drawImage(gImg, -pos.l, -pos.t, CANVAS_SIZE, CANVAS_SIZE);
+                         
+                         // Fabric Highlights (Screen)
+                         c.globalCompositeOperation = 'screen';
+                         c.globalAlpha = garmentColor === 'black' ? 0.4 : 0.15;
+                         c.drawImage(gImg, -pos.l, -pos.t, CANVAS_SIZE, CANVAS_SIZE);
+                         
+                         // Clip excess spillover perfectly to the artwork's edges
+                         c.globalCompositeOperation = 'destination-in';
+                         c.globalAlpha = 1.0;
+                         c.drawImage(i, 0, 0, pos.w, ah);
+                      };
+                      gImg.src = src; 
+                    }; 
+                    i.src = uploadedImage; 
+                  } 
+                }} className="w-full pointer-events-none" /></div>}
               </div>
             </div>
           </div>
@@ -725,6 +990,19 @@
 
       return (
         <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden relative" onDragEnter={(e) => handleDragEvent('enter', e)} onDragOver={(e) => e.preventDefault()} onDragLeave={(e) => handleDragEvent('leave', e)} onDrop={(e) => handleDragEvent('drop', e)}>
+          
+          {/* Global Loading & Saving States */}
+          {isProcessingFile && (
+            <div className="absolute inset-0 z-[99999] bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-200">
+               <div className="line-loader mb-2"></div>
+            </div>
+          )}
+          {saveStatus && (
+            <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[9999] bg-black/80 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wide animate-in slide-in-from-bottom-4 fade-in duration-200">
+               {saveStatus}
+            </div>
+          )}
+
           <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => processFile(e.target.files[0])} />
           {isDragOver && <div className="absolute inset-0 z-[9999] bg-blue-500/10 backdrop-blur-[2px] m-3 border-4 border-dashed border-blue-500 rounded-3xl flex items-center justify-center pointer-events-none transition-all duration-100"><div className="bg-white px-8 py-6 rounded-3xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-100"><div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center"><Icon path={Paths.Upload} size={28} className="text-blue-500" /></div><div className="text-center"><h3 className="font-roboto-bold text-xl text-slate-800">Drop Design</h3><p className="text-slate-500 text-sm mt-1">Release to upload</p></div></div></div>}
           <PWAInstallPrompt />
@@ -772,6 +1050,60 @@
           {isStudioOpen && <ArtworkStudio rawImage={rawImage} initialTransform={transform} initialPaper={paperSize} isBgRemoved={isBgRemoved} isInverted={isInverted} onConfirm={(t, p, newRaw) => { setTransform(t); setPaperSize(p); if (newRaw) { setRawImage(newRaw); const img = new Image(); img.onload = () => setProcessedImage(img); img.src = newRaw; } setIsStudioOpen(false); }} onCancel={() => setIsStudioOpen(false)} />}
           
           <div className="flex-1 w-full relative flex flex-col items-center justify-center bg-[#f8fafc] overflow-hidden">
+             {/* Cloud Designs Modal overlaying the canvas */}
+             {isCloudModalOpen && (
+               <div className="absolute inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-bottom-8 fade-in duration-200 overflow-hidden">
+                   <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50 relative">
+                     {isDownloadingCloud && (
+                       <div className="absolute inset-0 z-20 bg-white/70 backdrop-blur-sm flex flex-col items-center justify-center">
+                          <div className="line-loader mb-2"></div>
+                          <span className="text-xs font-bold text-slate-600 uppercase tracking-widest mt-2">Preparing File...</span>
+                       </div>
+                     )}
+
+                     {!user ? (
+                       <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                         <Icon path={Paths.Cloud} size={48} className="mb-4 opacity-50" />
+                         <p className="text-sm font-medium">Cloud features are currently unavailable.</p>
+                         <p className="text-xs mt-1">Verify your Firebase config if running on GitHub.</p>
+                       </div>
+                     ) : cloudDesigns.length === 0 ? (
+                       <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                         <Icon path={Paths.Upload} size={48} className="mb-4 opacity-50" />
+                         <p className="text-sm font-medium">No saved designs yet.</p>
+                         <p className="text-xs mt-1">Export a mockup to backup your artwork automatically.</p>
+                       </div>
+                     ) : (
+                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
+                         {cloudDesigns.map(design => (
+                           <div key={design.id} className="bg-white border rounded-2xl p-3 flex flex-col group hover:shadow-md transition-shadow">
+                             <div className="aspect-[3/4] bg-slate-100 rounded-xl mb-3 overflow-hidden relative flex items-center justify-center">
+                               <img src={design.thumbnail} className="max-w-[80%] max-h-[80%] object-contain" />
+                               <div className="absolute top-2 right-2 bg-black/60 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase">
+                                 {design.paperSize || "A4"}
+                               </div>
+                             </div>
+                             <div className="flex justify-between items-center mt-auto">
+                               <span className="text-xs text-slate-500 font-medium">
+                                 {new Date(design.createdAt).toLocaleDateString()}
+                               </span>
+                               <div className="flex gap-1">
+                                 <button onClick={() => deleteCloudDesign(design)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                   <Icon path={Paths.Trash} size={14} />
+                                 </button>
+                                 <button onClick={() => downloadCloudDesign(design)} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg transition-colors">
+                                   <Icon path={Paths.Download} size={14} />
+                                 </button>
+                               </div>
+                             </div>
+                           </div>
+                         ))}
+                       </div>
+                     )}
+                   </div>
+               </div>
+             )}
+
              {showUploadMenu && (
                <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none bg-black/5 backdrop-blur-[1.5px] transition-all">
                  <div className="flex gap-5 pointer-events-auto animate-in zoom-in-95 duration-150">
@@ -809,16 +1141,18 @@
                 </div>
               </div>
               <div className="flex items-center gap-2 w-full overflow-x-auto hide-scrollbar">
-                <div className="flex h-10 border rounded-xl bg-white overflow-hidden flex-1 max-w-[200px]">
+                <div className="flex h-10 border rounded-xl bg-white overflow-hidden flex-1 max-w-[200px] shrink-0">
                    <button onClick={() => handleSnap('left')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapLeft} size={14} /></button>
                    <button onClick={() => handleSnap('right')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapRight} size={14} /></button>
                    <button onClick={() => handleSnap('up')} className="flex-1 flex items-center justify-center border-r hover:bg-slate-50"><Icon path={Paths.SnapUp} size={14} /></button>
                    <button onClick={() => handleSnap('down')} className="flex-1 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.SnapDown} size={14} /></button>
                 </div>
-                <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 ${isBgRemoved ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Remove BG"><Icon path={Paths.Eraser} size={16} /></button>
-                <button onClick={() => setIsInverted(!isInverted)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 ${isInverted ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Invert Colors"><Icon path={Paths.Invert} size={16} /></button>
-                <button onClick={() => setIsStudioOpen(true)} className="flex-1 min-w-[40px] h-10 border rounded-xl bg-white flex items-center justify-center duration-100" title="Edit Design"><Icon path={Paths.Edit} size={16} /></button>
-                <button onClick={downloadMockup} className="flex-1 min-w-[40px] h-10 bg-black text-white rounded-xl flex items-center justify-center active:scale-95 duration-100" title="Download"><Icon path={Paths.Download} size={16} /></button>
+                <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 shrink-0 ${isBgRemoved ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Remove BG"><Icon path={Paths.Eraser} size={16} /></button>
+                <button onClick={() => setIsInverted(!isInverted)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center duration-100 shrink-0 ${isInverted ? 'bg-slate-100 text-black' : 'text-slate-400'}`} title="Invert Colors"><Icon path={Paths.Invert} size={16} /></button>
+                <button onClick={() => setIsStudioOpen(true)} className="flex-1 min-w-[40px] h-10 border rounded-xl bg-white flex items-center justify-center duration-100 shrink-0" title="Edit Design"><Icon path={Paths.Edit} size={16} /></button>
+                <div className="h-6 w-px bg-slate-200 shrink-0 mx-1"></div>
+                <button onClick={() => setIsCloudModalOpen(!isCloudModalOpen)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 ${isCloudModalOpen ? 'border-red-200 bg-red-50 text-red-600' : 'border-blue-200 bg-blue-50 text-blue-600'}`} title={isCloudModalOpen ? "Close Cloud Backup" : "Cloud Backup"}><Icon path={isCloudModalOpen ? Paths.Close : Paths.Cloud} size={16} /></button>
+                <button onClick={downloadMockup} className="flex-1 min-w-[40px] h-10 bg-black text-white rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0" title="Download"><Icon path={Paths.Download} size={16} /></button>
               </div>
             </div>
           </div>
