@@ -100,8 +100,7 @@
     };
 
     // Helper to prevent Babel from transpiling dynamic imports into require()
-    // SDK set to v12.13.0
-    const loadFirebase = async (module) => await new Function(`return import("https://www.gstatic.com/firebasejs/12.13.0/${module}")`)();
+    const loadFirebase = async (module) => await new Function(`return import("https://www.gstatic.com/firebasejs/11.6.1/${module}")`)();
 
     const { useState, useRef, useEffect, useCallback } = React;
 
@@ -225,8 +224,8 @@
       Block: "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M4.929 4.929l14.142 14.142",
       SnapLeft: "M15 18l-6-6 6-6",
       SnapRight: "M9 18l6-6-6-6",
-      SnapUp: "M18 9l-6 6-6-6",
-      SnapDown: "M18 15l-6-6-6 6",
+      SnapUp: "M18 15l-6-6-6 6",
+      SnapDown: "M18 9l-6 6-6-6",
       Link: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71m-2.83 2.83a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71",
       Cloud: "M17.5 19C19.985 19 22 16.985 22 14.5C22 12.15 20.215 10.22 17.925 10.025C17.45 7.155 14.965 5 12 5C8.685 5 6 7.685 6 11C6 11.135 6.005 11.27 6.02 11.405C3.765 11.585 2 13.485 2 15.835C2 18.135 3.865 20 6.165 20H17.5V19Z",
       Trash: "M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"
@@ -246,13 +245,11 @@
       const h = temp.height;
       const rawAlpha = new Uint8Array(w * h);
 
-      // Pass 1: Initial color distance mask
       for (let i = 0; i < data.length; i += 4) { 
         const d = (Math.abs(data[i]-bgR) + Math.abs(data[i+1]-bgG) + Math.abs(data[i+2]-bgB)) / 3; 
         rawAlpha[i/4] = d < 35 ? 0 : (d < 55 ? ((d - 35) / 20) * 255 : 255);
       }
 
-      // Fast Rolling Box Blur for Vector-like Curve Smoothing
       const blurAlpha = (input, width, height, radius) => {
         const out1 = new Uint8Array(width * height);
         const out2 = new Uint8Array(width * height);
@@ -289,7 +286,6 @@
       let smoothedAlpha = blurAlpha(rawAlpha, w, h, radius);
       smoothedAlpha = blurAlpha(smoothedAlpha, w, h, radius); 
 
-      // Pass 3: Strict Thresholding with 1-2px Anti-Aliasing (DTF Safe)
       for (let i = 0; i < smoothedAlpha.length; i++) {
         let a = smoothedAlpha[i];
         if (a < 115) data[i*4+3] = 0;
@@ -305,7 +301,15 @@
       const tCtx = temp.getContext('2d'); tCtx.drawImage(img, 0, 0);
       const pixels = tCtx.getImageData(0, 0, img.width, img.height).data;
       let minX = img.width, minY = img.height, maxX = 0, maxY = 0, found = false;
-      for (let y = 0; y < img.height; y += 10) { for (let x = 0; x < img.width; x += 10) { if (pixels[(y * img.width + x) * 4 + 3] > 15) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); found = true; } } }
+      for (let y = 0; y < img.height; y += 10) { 
+        for (let x = 0; x < img.width; x += 10) { 
+          if (pixels[(y * img.width + x) * 4 + 3] > 15) { 
+            minX = Math.min(minX, x); maxX = Math.max(maxX, x); 
+            minY = Math.min(minY, y); maxY = Math.max(maxY, y); 
+            found = true; 
+          } 
+        } 
+      }
       return found ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY } : { x: 0, y: 0, w: img.width, h: img.height };
     };
 
@@ -365,24 +369,6 @@
 
       useEffect(() => { render(); }, [render]);
 
-      const getCoord = (e) => {
-        if (!e) return { x: 0, y: 0, localX: 0, localY: 0, ratio: 1 };
-        const rect = canvasRef.current.getBoundingClientRect();
-        
-        const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : e.clientX;
-        const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : e.clientY;
-        
-        const ratio = canvasRef.current.width / rect.width;
-        
-        const canvasX = (clientX - rect.left) * ratio;
-        const canvasY = (clientY - rect.top) * ratio;
-        
-        const localX = (canvasX - transform.x) / transform.scale + (images.original.width / 2);
-        const localY = (canvasY - transform.y) / transform.scale + (images.original.height / 2);
-        
-        return { x: clientX, y: clientY, localX, localY, ratio };
-      };
-
       const handleInteraction = (type, e) => {
         if (!canvasRef.current || !images.original) return;
         
@@ -395,11 +381,27 @@
           return;
         }
 
-        const { x, y, localX, localY, ratio } = getCoord(e);
+        const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : (e.clientX || 0);
+        const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : (e.clientY || 0);
+
+        // Helper: Accurately maps screen coordinates into the scaled Canvas context
+        const getLocalCoords = () => {
+          const rect = canvasRef.current.getBoundingClientRect();
+          const visualScale = Math.min(rect.width / canvasRef.current.width, rect.height / canvasRef.current.height);
+          const offsetX = (rect.width - canvasRef.current.width * visualScale) / 2;
+          const offsetY = (rect.height - canvasRef.current.height * visualScale) / 2;
+          const canvasX = (clientX - (rect.left + offsetX)) / visualScale;
+          const canvasY = (clientY - (rect.top + offsetY)) / visualScale;
+          return {
+            localX: (canvasX - transform.x) / transform.scale + (images.original.width / 2),
+            localY: (canvasY - transform.y) / transform.scale + (images.original.height / 2)
+          };
+        };
 
         if (type === 'start') {
           if (isEraserActive) {
             isDrawing.current = true;
+            const { localX, localY } = getLocalCoords();
             const mCtx = eraserMaskRef.current.getContext('2d');
             mCtx.beginPath();
             mCtx.moveTo(localX, localY);
@@ -409,11 +411,12 @@
               startScale.current = transform.scale;
             } else {
               isDragging.current = true;
-              lastPos.current = { x, y };
+              lastPos.current = { x: clientX, y: clientY };
             }
           }
         } else if (type === 'move') {
           if (isEraserActive && isDrawing.current) {
+            const { localX, localY } = getLocalCoords();
             const mCtx = eraserMaskRef.current.getContext('2d');
             mCtx.lineTo(localX, localY);
             mCtx.strokeStyle = 'black';
@@ -426,8 +429,15 @@
               const dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
               setTransform(p => ({ ...p, scale: startScale.current * (dist / startDist.current) }));
             } else {
-              setTransform(p => ({ ...p, x: p.x + (x - lastPos.current.x) * ratio, y: p.y + (y - lastPos.current.y) * ratio }));
-              lastPos.current = { x, y };
+              const rect = canvasRef.current.getBoundingClientRect();
+              const visualScale = Math.min(rect.width / canvasRef.current.width, rect.height / canvasRef.current.height);
+              
+              // Calculate real-time screen movement delta, scale it up to canvas size
+              const dx = (clientX - lastPos.current.x) / visualScale;
+              const dy = (clientY - lastPos.current.y) / visualScale;
+              
+              setTransform(p => ({ ...p, x: p.x + dx, y: p.y + dy }));
+              lastPos.current = { x: clientX, y: clientY };
             }
           }
         }
@@ -447,21 +457,43 @@
       };
 
       const handleSnap = (direction) => {
-        const activeImg = isBgRemoved ? images.processed : images.original;
-        if (!activeImg) return;
-        const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
-        const bounds = detectContentBounds(activeImg);
-        
-        setTransform(p => {
-          const sw = activeImg.width * p.scale;
-          const sh = activeImg.height * p.scale;
-          let nx = p.x, ny = p.y;
-          if (direction === 'left') nx = (sw / 2) - bounds.x * p.scale;
-          if (direction === 'right') nx = target.w - (sw / 2) + (activeImg.width - (bounds.x + bounds.w)) * p.scale;
-          if (direction === 'up') ny = (sh / 2) - bounds.y * p.scale;
-          if (direction === 'down') ny = target.h - (sh / 2) + (activeImg.height - (bounds.y + bounds.h)) * p.scale;
-          return { ...p, x: nx, y: ny };
-        });
+        try {
+          const activeImg = isBgRemoved ? images.processed : images.original;
+          if (!activeImg) return;
+          
+          const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
+          const bounds = detectContentBounds(activeImg);
+          
+          setTransform(p => {
+            const scale = p.scale;
+            const cx = target.w / 2;
+            const cy = target.h / 2;
+            
+            const imgW = activeImg.width * scale;
+            const imgH = activeImg.height * scale;
+            
+            // Map the detected bounds against the scaled image dimensions
+            const contentLeft = bounds.x * scale;
+            const contentRight = (bounds.x + bounds.w) * scale;
+            const contentTop = bounds.y * scale;
+            const contentBottom = (bounds.y + bounds.h) * scale;
+            
+            let nx = p.x;
+            let ny = p.y;
+            
+            if (direction === 'left') nx = (imgW / 2) - contentLeft;
+            if (direction === 'right') nx = target.w + (imgW / 2) - contentRight;
+            if (direction === 'center-h') nx = cx + (imgW / 2) - (contentLeft + contentRight) / 2;
+            
+            if (direction === 'up') ny = (imgH / 2) - contentTop;
+            if (direction === 'down') ny = target.h + (imgH / 2) - contentBottom;
+            if (direction === 'center-v') ny = cy + (imgH / 2) - (contentTop + contentBottom) / 2;
+            
+            return { ...p, x: nx, y: ny };
+          });
+        } catch (e) {
+          console.error("Snap alignment error:", e);
+        }
       };
 
       return (
@@ -470,7 +502,6 @@
                onMouseDown={(e) => handleInteraction('start', e)}
                onMouseMove={(e) => handleInteraction('move', e)} 
                onMouseUp={(e) => handleInteraction('end', e)} 
-               onMouseLeave={(e) => handleInteraction('end', e)}
                onTouchStart={(e) => handleInteraction('start', e)}
                onTouchMove={(e) => handleInteraction('move', e)}
                onTouchEnd={(e) => handleInteraction('end', e)}>
@@ -500,12 +531,12 @@
               <div>
                 <span className="text-[10px] font-black uppercase text-slate-400 block mb-2">Scale / Zoom</span>
                 <div className="flex h-10 border border-slate-200 rounded-xl bg-white overflow-hidden">
-                   <button onClick={() => setTransform(p => ({...p, scale: p.scale*0.99}))} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50"><Icon path={Paths.Minus} size={14} /></button>
+                   <button onClick={() => setTransform(p => ({...p, scale: p.scale*0.99}))} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100"><Icon path={Paths.Minus} size={14} /></button>
                    <div className="flex-[2] flex items-center justify-center border-r border-slate-200">
                      <input type="number" value={Math.round((transform.scale / baseScale.current) * 100)} onChange={e => setTransform(p => ({...p, scale: (e.target.value/100)*baseScale.current}))} className="w-full bg-transparent text-slate-800 text-center font-bold text-xs focus:outline-none" />
                      <span className="text-[10px] font-bold text-slate-400 pr-3">%</span>
                    </div>
-                   <button onClick={() => setTransform(p => ({...p, scale: p.scale*1.01}))} className="flex-1 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.Plus} size={14} /></button>
+                   <button onClick={() => setTransform(p => ({...p, scale: p.scale*1.01}))} className="flex-1 flex items-center justify-center hover:bg-slate-50 active:bg-slate-100"><Icon path={Paths.Plus} size={14} /></button>
                 </div>
               </div>
 
@@ -514,11 +545,17 @@
                    <span className="text-[10px] font-black uppercase text-slate-400">Alignment</span>
                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wide bg-slate-100 px-2 py-0.5 rounded-full">Drag image to move</span>
                 </div>
-                <div className="flex h-10 border border-slate-200 rounded-xl bg-white overflow-hidden">
-                   <button onClick={() => handleSnap('left')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50"><Icon path={Paths.SnapLeft} size={14} /></button>
-                   <button onClick={() => handleSnap('right')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50"><Icon path={Paths.SnapRight} size={14} /></button>
-                   <button onClick={() => handleSnap('up')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50"><Icon path={Paths.SnapUp} size={14} /></button>
-                   <button onClick={() => handleSnap('down')} className="flex-1 flex items-center justify-center hover:bg-slate-50"><Icon path={Paths.SnapDown} size={14} /></button>
+                <div className="flex flex-col gap-1.5">
+                    <div className="flex h-10 border border-slate-200 rounded-xl bg-white overflow-hidden">
+                       <button onClick={() => handleSnap('left')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Align Left"><Icon path={Paths.SnapLeft} size={14} /></button>
+                       <button onClick={() => handleSnap('center-h')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Center Horizontal"><Icon path={Paths.Minus} size={14} /></button>
+                       <button onClick={() => handleSnap('right')} className="flex-1 flex items-center justify-center hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Align Right"><Icon path={Paths.SnapRight} size={14} /></button>
+                    </div>
+                    <div className="flex h-10 border border-slate-200 rounded-xl bg-white overflow-hidden">
+                       <button onClick={() => handleSnap('up')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Align Top"><Icon path={Paths.SnapUp} size={14} /></button>
+                       <button onClick={() => handleSnap('center-v')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Center Vertical"><div className="w-px h-3.5 bg-current"></div></button>
+                       <button onClick={() => handleSnap('down')} className="flex-1 flex items-center justify-center hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Align Bottom"><Icon path={Paths.SnapDown} size={14} /></button>
+                    </div>
                 </div>
               </div>
 
@@ -535,7 +572,7 @@
                 )}
               </div>
             </div>
-            <button onClick={handleFinalize} className="w-full py-3 bg-black text-white rounded-lg font-black uppercase tracking-[0.1em] text-[10px] active:scale-95 transition-all duration-100 mt-4 shrink-0">Apply Changes</button>
+            <button onClick={handleFinalize} className="w-full py-3 bg-black text-white rounded-lg font-black uppercase tracking-[0.1em] text-[10px] hover:bg-slate-800 active:scale-95 transition-all duration-100 mt-4 shrink-0">Apply Changes</button>
           </div>
         </div>
       );
@@ -625,7 +662,6 @@ navigator.clipboard.writeText(plainTextFallback).catch(() => {});
 
 console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
 
-    // Simple hash function to prevent duplicate uploads
     const generateHash = (str) => {
       let hash = 0;
       for (let i = 0, len = str.length; i < len; i++) {
@@ -696,7 +732,7 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
                 try {
                   await signInWithCustomToken(auth, __initial_auth_token);
                 } catch (e) {
-                  console.warn("Custom token sign-in failed (likely due to custom Firebase config). Falling back to anonymous auth.", e);
+                  console.warn("Custom token sign-in failed. Falling back to anonymous auth.", e);
                   await signInAnonymously(auth);
                 }
               } else {
@@ -721,10 +757,9 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         
         const initSnapshot = async () => {
           const { collection, onSnapshot } = await loadFirebase('firebase-firestore.js');
-          const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
           
-          // Using global_designs so it shows up in Incognito and across devices
-          const designsRef = collection(db, 'artifacts', appId, 'global_designs');
+          // Using a simple root collection for your Firebase project
+          const designsRef = collection(db, 'global_designs');
           
           unsubscribeSnapshot = onSnapshot(designsRef, (snapshot) => {
             const designs = [];
@@ -740,7 +775,6 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         return () => { if (unsubscribeSnapshot) unsubscribeSnapshot(); };
       }, [user, db]);
 
-      // Autofocus for Pin URL input
       useEffect(() => {
         if (isPinModalOpen) {
           const timer = setTimeout(() => {
@@ -838,7 +872,6 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         reader.readAsDataURL(file);
       };
 
-      // Download and save logic
       const downloadMockup = async () => {
         // --- 1. Local Download Mockup Generation (PRIORITY) ---
         for (const type of DOWNLOAD_VIEWS) {
@@ -860,35 +893,26 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
             const aw = pos.w;
             const ah = (aImg.naturalHeight/aImg.naturalWidth)*pos.w;
             
-            // Create a realistic fabric texture overlay using off-screen canvas
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = aw;
             tempCanvas.height = ah;
             const tc = tempCanvas.getContext('2d');
             
-            // 1. Base Artwork (Slight transparency blends it into the fabric base)
-            // Increased alpha for black shirts to mimic a solid white underbase
             tc.globalAlpha = garmentColor === 'black' ? 0.98 : 0.94;
             tc.drawImage(aImg, 0, 0, aw, ah);
             
-            // 2. Fabric Shadows (Multiply maps the dark folds over the design)
             tc.globalCompositeOperation = 'multiply';
-            // Drastically reduced multiply for black shirts so it doesn't dim the print
             tc.globalAlpha = garmentColor === 'black' ? 0.05 : 0.4;
             tc.drawImage(gImg, -pos.l, -pos.t, CANVAS_SIZE, CANVAS_SIZE);
             
-            // 3. Fabric Highlights (Screen maps the specular lighting over the design)
             tc.globalCompositeOperation = 'screen';
-            // Adjusted screen for black shirts to keep the realistic fabric sheen
             tc.globalAlpha = garmentColor === 'black' ? 0.25 : 0.15;
             tc.drawImage(gImg, -pos.l, -pos.t, CANVAS_SIZE, CANVAS_SIZE);
             
-            // 4. Masking: Trim away any shadows/highlights that spilled outside the artwork
             tc.globalCompositeOperation = 'destination-in';
             tc.globalAlpha = 1.0;
             tc.drawImage(aImg, 0, 0, aw, ah);
             
-            // Draw finalized realistic artwork onto the main mockup
             ctx.globalCompositeOperation = 'source-over'; 
             ctx.globalAlpha = 1.0;
             ctx.drawImage(tempCanvas, pos.l, pos.t, aw, ah);
@@ -906,10 +930,9 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
             if (!cloudDesigns.some(d => d.id === designId)) {
               setSaveStatus("Backing up print file...");
               const { doc, setDoc, collection } = await loadFirebase('firebase-firestore.js');
-              const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
               
-              // Ensure we write to the exact same global folder we read from
-              const designsRef = collection(db, 'artifacts', appId, 'global_designs');
+              // Using a simple root collection for your Firebase project
+              const designsRef = collection(db, 'global_designs');
               const newDocRef = doc(designsRef, designId);
 
               // Chunk base64 string to bypass 1MB firestore limit (~800KB chunks)
@@ -919,7 +942,6 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
                 chunks.push(uploadedImage.slice(i, i + CHUNK_SIZE));
               }
 
-              // Create a small thumbnail for the UI
               const thumbCanvas = document.createElement('canvas');
               thumbCanvas.width = 150;
               const img = new Image();
@@ -937,7 +959,6 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
                 paperSize: paperSize
               });
 
-              // Upload chunks
               for (let i = 0; i < chunks.length; i++) {
                 const chunkRef = doc(collection(newDocRef, 'chunks'), `chunk_${i}`);
                 await setDoc(chunkRef, { index: i, data: chunks[i] });
@@ -959,9 +980,9 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         setIsDownloadingCloud(true);
         try {
            const { getDocs, collection } = await loadFirebase('firebase-firestore.js');
-           const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
            
-           const chunksRef = collection(db, 'artifacts', appId, 'global_designs', design.id, 'chunks');
+           // Using a simple root collection for your Firebase project
+           const chunksRef = collection(db, 'global_designs', design.id, 'chunks');
            const snapshot = await getDocs(chunksRef);
            
            const chunks = [];
@@ -986,8 +1007,9 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         if (!user || !db) return;
         try {
             const { doc, deleteDoc, collection } = await loadFirebase('firebase-firestore.js');
-            const appId = typeof __app_id !== 'undefined' ? __app_id : PRODUCTION_FIREBASE_CONFIG.appId || 'default-app-id';
-            const docRef = doc(db, 'artifacts', appId, 'global_designs', design.id);
+            
+            // Using a simple root collection for your Firebase project
+            const docRef = doc(db, 'global_designs', design.id);
             
             for(let i=0; i<design.chunksCount; i++) {
                 await deleteDoc(doc(collection(docRef, 'chunks'), `chunk_${i}`));
@@ -1101,7 +1123,6 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
           <div key={`${type}-${garmentColor}-${selectedDriver}`} className={wrapperClass}>
             <div className="canvas-wrapper relative bg-white w-full h-full overflow-hidden rounded-2xl border border-slate-100">
               <div style={{ width: CANVAS_SIZE, height: CANVAS_SIZE, transform: `scale(${editorScale})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}>
-                {/* Forced remount key on the image tag to ensure the browser doesn't cache broken 'display: none' states when switching garment colors */}
                 <img key={src} src={src} className="w-full h-full absolute inset-0 object-cover pointer-events-none" onError={(e) => { e.target.style.display='none'; }} onLoad={(e) => { e.target.style.display='block'; }}/>
                 {type === 'front' && selectedDriver && <img src={DRIVERS.find(d=>d.id===selectedDriver).image} className="absolute pointer-events-none" style={{ width: 650, left: -85, bottom: '-130%', zIndex: 5 }} onError={(e) => { e.target.style.display='none'; }} />}
                 {showArt && <div className="absolute" style={{ left: pos.l, top: pos.t, width: pos.w, zIndex: 10 }}><canvas ref={el => { 
@@ -1115,22 +1136,18 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
                       
                       const gImg = new Image();
                       gImg.onload = () => {
-                         // Base Artwork
                          c.globalAlpha = garmentColor === 'black' ? 0.98 : 0.94; 
                          c.globalCompositeOperation = 'source-over'; 
                          c.drawImage(i, 0, 0, pos.w, ah); 
                          
-                         // Fabric Shadows (Multiply)
                          c.globalCompositeOperation = 'multiply';
                          c.globalAlpha = garmentColor === 'black' ? 0.05 : 0.4;
                          c.drawImage(gImg, -pos.l, -pos.t, CANVAS_SIZE, CANVAS_SIZE);
                          
-                         // Fabric Highlights (Screen)
                          c.globalCompositeOperation = 'screen';
                          c.globalAlpha = garmentColor === 'black' ? 0.25 : 0.15;
                          c.drawImage(gImg, -pos.l, -pos.t, CANVAS_SIZE, CANVAS_SIZE);
                          
-                         // Clip excess spillover perfectly to the artwork's edges
                          c.globalCompositeOperation = 'destination-in';
                          c.globalAlpha = 1.0;
                          c.drawImage(i, 0, 0, pos.w, ah);
@@ -1149,7 +1166,6 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
       return (
         <div className="h-screen w-full flex flex-col bg-slate-50 overflow-hidden relative" onDragEnter={(e) => handleDragEvent('enter', e)} onDragOver={(e) => e.preventDefault()} onDragLeave={(e) => handleDragEvent('leave', e)} onDrop={(e) => handleDragEvent('drop', e)}>
           
-          {/* Global Loading & Saving States */}
           {isProcessingFile && (
             <div className="absolute inset-0 z-[99999] bg-slate-900/40 flex flex-col items-center justify-center animate-in fade-in duration-200">
                <div className="line-loader mb-2"></div>
