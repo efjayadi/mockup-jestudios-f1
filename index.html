@@ -228,7 +228,10 @@
       SnapDown: "M18 9l-6 6-6-6",
       Link: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71m-2.83 2.83a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71",
       Cloud: "M17.5 19C19.985 19 22 16.985 22 14.5C22 12.15 20.215 10.22 17.925 10.025C17.45 7.155 14.965 5 12 5C8.685 5 6 7.685 6 11C6 11.135 6.005 11.27 6.02 11.405C3.765 11.585 2 13.485 2 15.835C2 18.135 3.865 20 6.165 20H17.5V19Z",
-      Trash: "M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"
+      Trash: "M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6",
+      Crop: "M7 20V6h12 M18 4v14H6 M16 16l6 6 M22 22v-4.5 M22 22h-4.5",
+      Undo: "M3 10h10a5 5 0 0 1 5 5v2a5 5 0 0 1-5 5H6 M3 10l4-4 M3 10l4 4",
+      Redo: "M21 10H11a5 5 0 0 0-5 5v2a5 5 0 0 0 5 5h7 M21 10l-4-4 M21 10l-4 4"
     };
 
     const createProcessedImage = async (img) => {
@@ -301,16 +304,21 @@
       const tCtx = temp.getContext('2d'); tCtx.drawImage(img, 0, 0);
       const pixels = tCtx.getImageData(0, 0, img.width, img.height).data;
       let minX = img.width, minY = img.height, maxX = 0, maxY = 0, found = false;
-      for (let y = 0; y < img.height; y += 10) { 
-        for (let x = 0; x < img.width; x += 10) { 
-          if (pixels[(y * img.width + x) * 4 + 3] > 15) { 
+      for (let y = 0; y < img.height; y += 4) { 
+        for (let x = 0; x < img.width; x += 4) { 
+          if (pixels[(y * img.width + x) * 4 + 3] > 10) { 
             minX = Math.min(minX, x); maxX = Math.max(maxX, x); 
             minY = Math.min(minY, y); maxY = Math.max(maxY, y); 
             found = true; 
           } 
         } 
       }
-      return found ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY } : { x: 0, y: 0, w: img.width, h: img.height };
+      if (found) {
+         minX = Math.max(0, minX - 4); minY = Math.max(0, minY - 4);
+         maxX = Math.min(img.width, maxX + 4); maxY = Math.min(img.height, maxY + 4);
+         return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+      }
+      return { x: 0, y: 0, w: img.width, h: img.height };
     };
 
     function ArtworkStudio({ rawImage, initialTransform, initialPaper, isBgRemoved, setIsBgRemoved, isInverted, setIsInverted, onConfirm, onCancel }) {
@@ -321,13 +329,126 @@
       const [paper, setPaper] = useState(initialPaper);
       const [isEraserActive, setIsEraserActive] = useState(false);
       const [brushSize, setBrushSize] = useState(40);
+      const [isCropMode, setIsCropMode] = useState(false);
+      const [cropBox, setCropBox] = useState(null);
+      const [cropHoverCursor, setCropHoverCursor] = useState('default');
       
+      const cropAction = useRef(null);
+      const cropStartPos = useRef({ x: 0, y: 0 });
+
       const isDrawing = useRef(false);
       const isDragging = useRef(false);
       const lastPos = useRef({ x: 0, y: 0 });
       const startDist = useRef(0);
       const startScale = useRef(1);
       const baseScale = useRef(initialTransform.scale);
+
+      const rawTransformRef = useRef({ x: initialTransform.x, y: initialTransform.y, scale: initialTransform.scale });
+      const contentBoundsRef = useRef(null);
+      const snapGuidesRef = useRef({ x: null, y: null });
+
+      const historyRef = useRef([]);
+      const historyIndex = useRef(-1);
+      const currentStateRef = useRef({ transform: initialTransform, images: { original: null, processed: null } });
+      const [canUndo, setCanUndo] = useState(false);
+      const [canRedo, setCanRedo] = useState(false);
+
+      useEffect(() => { currentStateRef.current = { transform, images }; }, [transform, images]);
+
+      const saveHistoryState = useCallback((overrides = null) => {
+          const current = overrides || currentStateRef.current;
+          if (!current.images.original) return;
+          const state = {
+              transform: current.transform,
+              images: current.images,
+              eraserDataUrl: eraserMaskRef.current ? eraserMaskRef.current.toDataURL() : null
+          };
+          const nextIndex = historyIndex.current + 1;
+          historyRef.current = historyRef.current.slice(0, nextIndex);
+          historyRef.current.push(state);
+          historyIndex.current = nextIndex;
+          setCanUndo(historyIndex.current > 0);
+          setCanRedo(historyIndex.current < historyRef.current.length - 1);
+      }, []);
+
+      const loadHistoryState = useCallback((index) => {
+          if (index < 0 || index >= historyRef.current.length) return;
+          const state = historyRef.current[index];
+          setTransform(state.transform);
+          setImages(state.images);
+          
+          if (eraserMaskRef.current && state.images && state.images.original) {
+              // Vital fix: Resize the hidden mask canvas to match the image dimensions from history
+              eraserMaskRef.current.width = state.images.original.width;
+              eraserMaskRef.current.height = state.images.original.height;
+              const mCtx = eraserMaskRef.current.getContext('2d');
+              mCtx.clearRect(0, 0, eraserMaskRef.current.width, eraserMaskRef.current.height);
+              
+              if (state.eraserDataUrl) {
+                  const img = new Image();
+                  img.onload = () => {
+                      mCtx.drawImage(img, 0, 0);
+                      render();
+                  };
+                  img.src = state.eraserDataUrl;
+              } else {
+                  render();
+              }
+          }
+          
+          historyIndex.current = index;
+          setCanUndo(index > 0);
+          setCanRedo(index < historyRef.current.length - 1);
+      }, [render]);
+
+      const undo = useCallback(() => {
+          if (historyIndex.current > 0) loadHistoryState(historyIndex.current - 1);
+      }, [loadHistoryState]);
+
+      const redo = useCallback(() => {
+          if (historyIndex.current < historyRef.current.length - 1) loadHistoryState(historyIndex.current + 1);
+      }, [loadHistoryState]);
+
+      const checkCropHit = (localX, localY, box) => {
+        if (!box) return 'draw';
+        const handleSize = Math.max(18, 54 / transform.scale); // Generous padding for easier grabbing
+        const { x: bx, y: by, w, h } = box;
+        const hit = (hx, hy) => Math.abs(localX - (bx + hx)) < handleSize && Math.abs(localY - (by + hy)) < handleSize;
+
+        if (hit(0, 0)) return 'tl';
+        if (hit(w, 0)) return 'tr';
+        if (hit(0, h)) return 'bl';
+        if (hit(w, h)) return 'br';
+        if (hit(w/2, 0)) return 'tc';
+        if (hit(w/2, h)) return 'bc';
+        if (hit(0, h/2)) return 'ml';
+        if (hit(w, h/2)) return 'mr';
+        if (localX > bx && localX < bx + w && localY > by && localY < by + h) return 'move';
+        return 'draw';
+      };
+
+      const getCursorFromAction = (action) => {
+         if (action === 'tl' || action === 'br') return 'nwse-resize';
+         if (action === 'tr' || action === 'bl') return 'nesw-resize';
+         if (action === 'tc' || action === 'bc') return 'ns-resize';
+         if (action === 'ml' || action === 'mr') return 'ew-resize';
+         if (action === 'move') return 'move';
+         return 'default';
+      };
+
+      useEffect(() => {
+          const handleKeyDown = (e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                  if (e.shiftKey) { e.preventDefault(); redo(); }
+                  else { e.preventDefault(); undo(); }
+              }
+              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                  e.preventDefault(); redo();
+              }
+          };
+          window.addEventListener('keydown', handleKeyDown);
+          return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [undo, redo]);
 
       useEffect(() => {
         const img = new Image();
@@ -337,9 +458,81 @@
           const mask = document.createElement('canvas');
           mask.width = img.width; mask.height = img.height;
           eraserMaskRef.current = mask;
+          contentBoundsRef.current = detectContentBounds(proc);
+          
+          setTimeout(() => {
+             historyRef.current = [];
+             historyIndex.current = -1;
+             saveHistoryState({ transform: initialTransform, images: { original: img, processed: proc } });
+          }, 50);
         };
         img.src = rawImage;
-      }, [rawImage]);
+      }, [rawImage, initialTransform, saveHistoryState]);
+
+      const applyCrop = async () => {
+        if (!cropBox || cropBox.w === 0 || cropBox.h === 0) { setIsCropMode(false); return; }
+        
+        const active = isBgRemoved ? images.processed : images.original;
+        
+        // Convert to strictly positive top-left origin coordinates
+        const x = Math.max(0, Math.round(cropBox.x));
+        const y = Math.max(0, Math.round(cropBox.y));
+        let w = Math.round(cropBox.w);
+        let h = Math.round(cropBox.h);
+        
+        if (x + w > active.width) w = active.width - x;
+        if (y + h > active.height) h = active.height - y;
+        
+        if (w < 10 || h < 10) { 
+          setIsCropMode(false); setCropBox(null); return; 
+        }
+        
+        const cropToImage = async (srcCanvas) => {
+          return new Promise(res => {
+              const img = new Image(); img.onload = () => res(img); img.src = srcCanvas.toDataURL();
+          });
+        };
+        
+        // Crop Original
+        const origC = document.createElement('canvas'); origC.width = w; origC.height = h;
+        origC.getContext('2d').drawImage(images.original, x, y, w, h, 0, 0, w, h);
+        
+        // Crop Processed (if it exists)
+        let procC = null;
+        if (images.processed) {
+            procC = document.createElement('canvas'); procC.width = w; procC.height = h;
+            procC.getContext('2d').drawImage(images.processed, x, y, w, h, 0, 0, w, h);
+        }
+        
+        // Crop Eraser Mask
+        const maskC = document.createElement('canvas'); maskC.width = w; maskC.height = h;
+        maskC.getContext('2d').drawImage(eraserMaskRef.current, x, y, w, h, 0, 0, w, h);
+        
+        const newOrig = await cropToImage(origC);
+        const newProc = procC ? await cropToImage(procC) : null;
+        
+        // Adjust coordinate system so the visual image doesn't jump on the screen
+        const oldCenterX = images.original.width / 2;
+        const oldCenterY = images.original.height / 2;
+        const newCenterX = x + w / 2;
+        const newCenterY = y + h / 2;
+        
+        const dx = (oldCenterX - newCenterX) * transform.scale;
+        const dy = (oldCenterY - newCenterY) * transform.scale;
+        
+        const newTransform = { ...transform, x: transform.x - dx, y: transform.y - dy };
+        const newImages = { original: newOrig, processed: newProc };
+        
+        setTransform(newTransform);
+        setImages(newImages);
+        eraserMaskRef.current = maskC;
+        contentBoundsRef.current = detectContentBounds(newProc || newOrig);
+        
+        setIsCropMode(false);
+        setCropBox(null);
+        
+        setTimeout(() => saveHistoryState({ transform: newTransform, images: newImages }), 50);
+      };
 
       const render = useCallback(() => {
         const canvas = canvasRef.current; if (!canvas || !images.original) return;
@@ -364,10 +557,100 @@
         }
         
         if (isInverted) ctx.filter = 'none';
+
+        if (isCropMode) {
+          if (cropBox) {
+            // Handle inverted draws (negative widths)
+            const rx = cropBox.w < 0 ? cropBox.x + cropBox.w : cropBox.x;
+            const ry = cropBox.h < 0 ? cropBox.y + cropBox.h : cropBox.y;
+            const rw = Math.abs(cropBox.w);
+            const rh = Math.abs(cropBox.h);
+            
+            const cx = rx - active.width/2;
+            const cy = ry - active.height/2;
+            
+            const imgX = -active.width/2;
+            const imgY = -active.height/2;
+            const imgW = active.width;
+            const imgH = active.height;
+            
+            // Draw 4 masking rectangles around the crop area to keep the inside perfectly visible
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(imgX, imgY, imgW, cy - imgY); // Top
+            ctx.fillRect(imgX, cy + rh, imgW, (imgY + imgH) - (cy + rh)); // Bottom
+            ctx.fillRect(imgX, cy, cx - imgX, rh); // Left
+            ctx.fillRect(cx + rw, cy, (imgX + imgW) - (cx + rw), rh); // Right
+            
+            if (rw > 0 && rh > 0) {
+              // CorelDraw Style Outline
+              ctx.lineWidth = 1.5 / transform.scale;
+              ctx.strokeStyle = '#000000'; 
+              ctx.strokeRect(cx, cy, rw, rh);
+              
+              // 8 Interactive Handles (More visible, thicker borders)
+              ctx.fillStyle = '#ffffff';
+              ctx.strokeStyle = '#000000';
+              ctx.lineWidth = 3 / transform.scale;
+              const s = 24 / transform.scale; // Significantly larger nodes
+              
+              const drawHandle = (hx, hy) => {
+                 ctx.fillRect(hx - s/2, hy - s/2, s, s);
+                 ctx.strokeRect(hx - s/2, hy - s/2, s, s);
+              };
+              
+              drawHandle(cx, cy); // TL
+              drawHandle(cx + rw/2, cy); // TC
+              drawHandle(cx + rw, cy); // TR
+              drawHandle(cx, cy + rh/2); // ML
+              drawHandle(cx + rw, cy + rh/2); // MR
+              drawHandle(cx, cy + rh); // BL
+              drawHandle(cx + rw/2, cy + rh); // BC
+              drawHandle(cx + rw, cy + rh); // BR
+            }
+          } else {
+            // Fallback shading if no box is drawn yet
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(-active.width/2, -active.height/2, active.width, active.height);
+          }
+        }
+        
         ctx.restore();
-      }, [images, transform, isBgRemoved, isInverted, paper]);
+
+        const guides = snapGuidesRef.current;
+        if (guides.x !== null || guides.y !== null) {
+          ctx.lineWidth = Math.max(4, target.w / 350);
+          ctx.strokeStyle = '#ef4444'; // Bright Red Smart Guides
+          ctx.setLineDash([Math.max(15, target.w / 120), Math.max(15, target.w / 120)]);
+          
+          if (guides.x !== null) {
+            ctx.beginPath(); ctx.moveTo(guides.x, 0); ctx.lineTo(guides.x, target.h); ctx.stroke();
+          }
+          if (guides.y !== null) {
+            ctx.beginPath(); ctx.moveTo(0, guides.y); ctx.lineTo(target.w, guides.y); ctx.stroke();
+          }
+          ctx.setLineDash([]);
+        }
+      }, [images, transform, isBgRemoved, isInverted, paper, isCropMode, cropBox]);
 
       useEffect(() => { render(); }, [render]);
+
+      const getCoord = (e) => {
+        if (!e) return { x: 0, y: 0, localX: 0, localY: 0, ratio: 1 };
+        const rect = canvasRef.current.getBoundingClientRect();
+        
+        const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : e.clientX;
+        const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : e.clientY;
+        
+        const ratio = canvasRef.current.width / rect.width;
+        
+        const canvasX = (clientX - rect.left) * ratio;
+        const canvasY = (clientY - rect.top) * ratio;
+        
+        const localX = (canvasX - transform.x) / transform.scale + (images.original.width / 2);
+        const localY = (canvasY - transform.y) / transform.scale + (images.original.height / 2);
+        
+        return { x: clientX, y: clientY, localX, localY, ratio };
+      };
 
       const handleInteraction = (type, e) => {
         if (!canvasRef.current || !images.original) return;
@@ -376,32 +659,51 @@
         if (e.stopPropagation) e.stopPropagation();
 
         if (type === 'end') {
+          let stateChanged = false;
+          if (isDragging.current || isDrawing.current) stateChanged = true;
+          
           isDragging.current = false;
           isDrawing.current = false;
+          snapGuidesRef.current = { x: null, y: null };
+          
+          // Normalize the crop box so width and height are always positive
+          if (isCropMode && cropBox) {
+            setCropBox(p => ({
+               x: p.w < 0 ? p.x + p.w : p.x,
+               y: p.h < 0 ? p.y + p.h : p.y,
+               w: Math.abs(p.w),
+               h: Math.abs(p.h)
+            }));
+            cropAction.current = null;
+          }
+          
+          if (stateChanged && !isCropMode) {
+              setTimeout(() => saveHistoryState(), 0);
+          }
+          
+          render(); 
           return;
         }
 
-        const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : (e.clientX || 0);
-        const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : (e.clientY || 0);
-
-        // Helper: Accurately maps screen coordinates into the scaled Canvas context
-        const getLocalCoords = () => {
-          const rect = canvasRef.current.getBoundingClientRect();
-          const visualScale = Math.min(rect.width / canvasRef.current.width, rect.height / canvasRef.current.height);
-          const offsetX = (rect.width - canvasRef.current.width * visualScale) / 2;
-          const offsetY = (rect.height - canvasRef.current.height * visualScale) / 2;
-          const canvasX = (clientX - (rect.left + offsetX)) / visualScale;
-          const canvasY = (clientY - (rect.top + offsetY)) / visualScale;
-          return {
-            localX: (canvasX - transform.x) / transform.scale + (images.original.width / 2),
-            localY: (canvasY - transform.y) / transform.scale + (images.original.height / 2)
-          };
-        };
+        const { x, y, localX, localY, ratio } = getCoord(e);
 
         if (type === 'start') {
-          if (isEraserActive) {
+          if (isCropMode) {
+            isDragging.current = true;
+            if (cropBox) {
+              cropAction.current = checkCropHit(localX, localY, cropBox);
+              if (cropAction.current === 'move') {
+                cropStartPos.current = { x: localX - cropBox.x, y: localY - cropBox.y };
+              } else if (cropAction.current === 'draw') {
+                // Prevent dismissing or redrawing when clicking outside an active crop box
+                cropAction.current = 'none'; 
+              }
+            } else {
+              cropAction.current = 'draw';
+              setCropBox({ x: localX, y: localY, w: 0, h: 0 });
+            }
+          } else if (isEraserActive) {
             isDrawing.current = true;
-            const { localX, localY } = getLocalCoords();
             const mCtx = eraserMaskRef.current.getContext('2d');
             mCtx.beginPath();
             mCtx.moveTo(localX, localY);
@@ -411,16 +713,43 @@
               startScale.current = transform.scale;
             } else {
               isDragging.current = true;
-              lastPos.current = { x: clientX, y: clientY };
+              lastPos.current = { x, y };
+              rawTransformRef.current = { x: transform.x, y: transform.y, scale: transform.scale };
             }
           }
         } else if (type === 'move') {
-          if (isEraserActive && isDrawing.current) {
-            const { localX, localY } = getLocalCoords();
+          if (isCropMode && !isDragging.current) {
+             const action = checkCropHit(localX, localY, cropBox);
+             const newCursor = getCursorFromAction(action);
+             if (cropHoverCursor !== newCursor) setCropHoverCursor(newCursor);
+          } else if (isCropMode && isDragging.current) {
+            if (cropAction.current === 'draw') {
+              setCropBox(p => ({ ...p, w: localX - p.x, h: localY - p.y }));
+            } else if (cropAction.current === 'move') {
+              setCropBox(p => ({ ...p, x: localX - cropStartPos.current.x, y: localY - cropStartPos.current.y }));
+            } else if (cropAction.current === 'tl') {
+              setCropBox(p => ({ x: localX, y: localY, w: p.w + (p.x - localX), h: p.h + (p.y - localY) }));
+            } else if (cropAction.current === 'tr') {
+              setCropBox(p => ({ x: p.x, y: localY, w: localX - p.x, h: p.h + (p.y - localY) }));
+            } else if (cropAction.current === 'bl') {
+              setCropBox(p => ({ x: localX, y: p.y, w: p.w + (p.x - localX), h: localY - p.y }));
+            } else if (cropAction.current === 'br') {
+              setCropBox(p => ({ x: p.x, y: p.y, w: localX - p.x, h: localY - p.y }));
+            } else if (cropAction.current === 'tc') {
+              setCropBox(p => ({ x: p.x, y: localY, w: p.w, h: p.h + (p.y - localY) }));
+            } else if (cropAction.current === 'bc') {
+              setCropBox(p => ({ ...p, h: localY - p.y }));
+            } else if (cropAction.current === 'ml') {
+              setCropBox(p => ({ x: localX, y: p.y, w: p.w + (p.x - localX), h: p.h }));
+            } else if (cropAction.current === 'mr') {
+              setCropBox(p => ({ ...p, w: localX - p.x }));
+            }
+          } else if (isEraserActive && isDrawing.current) {
             const mCtx = eraserMaskRef.current.getContext('2d');
             mCtx.lineTo(localX, localY);
             mCtx.strokeStyle = 'black';
-            mCtx.lineWidth = brushSize / transform.scale;
+            // Sync the drawn width mathematically with the visual screen scale
+            mCtx.lineWidth = (brushSize * ratio) / transform.scale;
             mCtx.lineCap = 'round';
             mCtx.stroke();
             render();
@@ -432,15 +761,72 @@
               const rect = canvasRef.current.getBoundingClientRect();
               const visualScale = Math.min(rect.width / canvasRef.current.width, rect.height / canvasRef.current.height);
               
-              // Calculate real-time screen movement delta, scale it up to canvas size
-              const dx = (clientX - lastPos.current.x) / visualScale;
-              const dy = (clientY - lastPos.current.y) / visualScale;
+              const dx = (x - lastPos.current.x) / visualScale;
+              const dy = (y - lastPos.current.y) / visualScale;
               
-              setTransform(p => ({ ...p, x: p.x + dx, y: p.y + dy }));
-              lastPos.current = { x: clientX, y: clientY };
+              rawTransformRef.current.x += dx;
+              rawTransformRef.current.y += dy;
+              lastPos.current = { x, y };
+
+              const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
+              const bounds = contentBoundsRef.current;
+              let nx = rawTransformRef.current.x;
+              let ny = rawTransformRef.current.y;
+              let guides = { x: null, y: null };
+
+              if (bounds) {
+                const scale = transform.scale;
+                const activeImg = isBgRemoved ? images.processed : images.original;
+                const imgW = activeImg.width * scale;
+                const imgH = activeImg.height * scale;
+
+                const cLeft = bounds.x * scale;
+                const cRight = (bounds.x + bounds.w) * scale;
+                const cTop = bounds.y * scale;
+                const cBottom = (bounds.y + bounds.h) * scale;
+
+                // Projecting actual content boundaries mapped onto the Canvas grid
+                const curLeft = nx - (imgW / 2) + cLeft;
+                const curRight = nx - (imgW / 2) + cRight;
+                const curCenterX = (curLeft + curRight) / 2;
+
+                const curTop = ny - (imgH / 2) + cTop;
+                const curBottom = ny - (imgH / 2) + cBottom;
+                const curCenterY = (curTop + curBottom) / 2;
+
+                // Threshold: Snap when within 20 screen-pixels
+                const SNAP_T = 20 / visualScale;
+
+                // X-Axis Magnetic Snapping
+                if (Math.abs(curCenterX - target.w / 2) < SNAP_T) { nx = target.w / 2 + (imgW / 2) - (cLeft + cRight) / 2; guides.x = target.w / 2; }
+                else if (Math.abs(curLeft - 0) < SNAP_T) { nx = (imgW / 2) - cLeft; guides.x = 0; }
+                else if (Math.abs(curRight - target.w) < SNAP_T) { nx = target.w + (imgW / 2) - cRight; guides.x = target.w; }
+
+                // Y-Axis Magnetic Snapping
+                if (Math.abs(curCenterY - target.h / 2) < SNAP_T) { ny = target.h / 2 + (imgH / 2) - (cTop + cBottom) / 2; guides.y = target.h / 2; }
+                else if (Math.abs(curTop - 0) < SNAP_T) { ny = (imgH / 2) - cTop; guides.y = 0; }
+                else if (Math.abs(curBottom - target.h) < SNAP_T) { ny = target.h + (imgH / 2) - cBottom; guides.y = target.h; }
+              }
+
+              snapGuidesRef.current = guides;
+              setTransform(p => ({ ...p, x: nx, y: ny }));
             }
           }
         }
+      };
+
+      const getDynamicCursor = () => {
+        if (isCropMode) return cropHoverCursor;
+        if (!isEraserActive) return 'move';
+        
+        // Draw an exact double-ringed SVG target scaled to your brush, reduced by 20% for precision
+        const screenBrushSize = Math.max(4, Math.floor(brushSize * 0.8));
+        const size = Math.min(128, screenBrushSize + 4); 
+        const r = screenBrushSize / 2;
+        
+        const svg = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="rgba(239,68,68,0.15)" stroke="#ef4444" stroke-width="1.5"/><circle cx="${size/2}" cy="${size/2}" r="${r-1}" fill="none" stroke="white" stroke-width="1"/></svg>`;
+        const encodedSvg = btoa(svg);
+        return `url('data:image/svg+xml;base64,${encodedSvg}') ${size/2} ${size/2}, default`;
       };
 
       const handleFinalize = () => {
@@ -450,50 +836,39 @@
         const fCtx = finalCanvas.getContext('2d');
         const active = isBgRemoved ? images.processed : images.original;
         fCtx.drawImage(active, 0, 0);
-        fCtx.globalCompositeOperation = 'destination-out';
-        fCtx.drawImage(eraserMaskRef.current, 0, 0);
-        
+        if (eraserMaskRef.current) {
+          fCtx.globalCompositeOperation = 'destination-out';
+          fCtx.drawImage(eraserMaskRef.current, 0, 0);
+        }
         onConfirm(transform, paper, finalCanvas.toDataURL());
       };
 
       const handleSnap = (direction) => {
-        try {
-          const activeImg = isBgRemoved ? images.processed : images.original;
-          if (!activeImg) return;
+        const activeImg = isBgRemoved ? images.processed : images.original;
+        if (!activeImg) return;
+        const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
+        const bounds = contentBoundsRef.current || detectContentBounds(activeImg);
+        
+        setTransform(p => {
+          let nx = p.x, ny = p.y;
+          const imgW = activeImg.width * p.scale;
+          const imgH = activeImg.height * p.scale;
           
-          const target = paper === "A4" ? { w: A4.w, h: A4.h } : { w: A3.w, h: A3.h };
-          const bounds = detectContentBounds(activeImg);
+          const cLeft = bounds.x * p.scale;
+          const cRight = (bounds.x + bounds.w) * p.scale;
+          const cTop = bounds.y * p.scale;
+          const cBottom = (bounds.y + bounds.h) * p.scale;
+
+          if (direction === 'left') nx = (imgW / 2) - cLeft;
+          if (direction === 'center-h') nx = target.w / 2 + (imgW / 2) - (cLeft + cRight) / 2;
+          if (direction === 'right') nx = target.w + (imgW / 2) - cRight;
           
-          setTransform(p => {
-            const scale = p.scale;
-            const cx = target.w / 2;
-            const cy = target.h / 2;
-            
-            const imgW = activeImg.width * scale;
-            const imgH = activeImg.height * scale;
-            
-            // Map the detected bounds against the scaled image dimensions
-            const contentLeft = bounds.x * scale;
-            const contentRight = (bounds.x + bounds.w) * scale;
-            const contentTop = bounds.y * scale;
-            const contentBottom = (bounds.y + bounds.h) * scale;
-            
-            let nx = p.x;
-            let ny = p.y;
-            
-            if (direction === 'left') nx = (imgW / 2) - contentLeft;
-            if (direction === 'right') nx = target.w + (imgW / 2) - contentRight;
-            if (direction === 'center-h') nx = cx + (imgW / 2) - (contentLeft + contentRight) / 2;
-            
-            if (direction === 'up') ny = (imgH / 2) - contentTop;
-            if (direction === 'down') ny = target.h + (imgH / 2) - contentBottom;
-            if (direction === 'center-v') ny = cy + (imgH / 2) - (contentTop + contentBottom) / 2;
-            
-            return { ...p, x: nx, y: ny };
-          });
-        } catch (e) {
-          console.error("Snap alignment error:", e);
-        }
+          if (direction === 'up') ny = (imgH / 2) - cTop;
+          if (direction === 'center-v') ny = target.h / 2 + (imgH / 2) - (cTop + cBottom) / 2;
+          if (direction === 'down') ny = target.h + (imgH / 2) - cBottom;
+          
+          return { ...p, x: nx, y: ny };
+        });
       };
 
       return (
@@ -508,24 +883,56 @@
             <div className="relative w-full h-full flex items-center justify-center pointer-events-none">
               <canvas ref={canvasRef} 
                       draggable={false}
+                      style={{ cursor: getDynamicCursor() }}
                       onDragStart={(e) => e.preventDefault()}
                       onDrop={(e) => e.preventDefault()}
-                      className={`max-w-full max-h-full object-contain bg-white studio-canvas-bg rounded-sm touch-none pointer-events-auto ${isEraserActive ? 'cursor-crosshair' : 'cursor-move'}`} />
+                      className={`max-w-full max-h-full object-contain bg-white studio-canvas-bg rounded-sm touch-none pointer-events-auto`} />
             </div>
           </div>
           
           <div className="w-full md:w-[260px] bg-white p-4 flex flex-col justify-between border-l border-slate-200 z-40 relative overflow-y-auto">
             <div className="space-y-6">
-              <div className="flex justify-between items-center pb-2 border-b"><h2 className="font-roboto-bold text-sm text-slate-800 uppercase tracking-tighter">Edit Design</h2><button onClick={onCancel} className="p-1.5 bg-slate-50 rounded-full hover:bg-slate-200 duration-100"><Icon path={Paths.Close} size={14} /></button></div>
+              <div className="flex justify-between items-center pb-2 border-b">
+                <h2 className="font-roboto-bold text-sm text-slate-800 uppercase tracking-tighter">Edit Design</h2>
+                <div className="flex gap-1.5 items-center">
+                   <button onClick={undo} disabled={!canUndo} className={`p-1.5 rounded-full transition-colors ${canUndo ? 'text-slate-700 hover:bg-slate-100 active:bg-slate-200' : 'text-slate-300'}`} title="Undo (Ctrl+Z)"><Icon path={Paths.Undo} size={14} /></button>
+                   <button onClick={redo} disabled={!canRedo} className={`p-1.5 rounded-full transition-colors ${canRedo ? 'text-slate-700 hover:bg-slate-100 active:bg-slate-200' : 'text-slate-300'}`} title="Redo (Ctrl+Y)"><Icon path={Paths.Redo} size={14} /></button>
+                   <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                   <button onClick={onCancel} className="p-1.5 bg-slate-50 rounded-full hover:bg-slate-200 duration-100 text-slate-600"><Icon path={Paths.Close} size={14} /></button>
+                </div>
+              </div>
               
               <div>
                 <span className="text-[10px] font-black uppercase text-slate-400 block mb-2">Paper & Adjustments</span>
                 <div className="flex bg-slate-100 p-1 rounded-lg mb-3">{['A4', 'A3'].map(size => (<button key={size} onClick={() => setPaper(size)} className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-md transition-all duration-100 ${paper === size ? 'bg-white text-black shadow-sm' : 'text-slate-400'}`}>{size}</button>))}</div>
                 
-                <div className="flex gap-2">
-                  <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex-1 flex flex-col items-center justify-center py-2 border rounded-xl transition-all duration-100 ${isBgRemoved ? 'bg-black text-white border-black' : 'bg-white text-slate-500 border-slate-200'}`}><Icon path={Paths.Eraser} size={16} className="mb-1" /> <span className="text-[9px] font-bold uppercase">No BG</span></button>
-                  <button onClick={() => setIsInverted(!isInverted)} className={`flex-1 flex flex-col items-center justify-center py-2 border rounded-xl transition-all duration-100 ${isInverted ? 'bg-black text-white border-black' : 'bg-white text-slate-500 border-slate-200'}`}><Icon path={Paths.Invert} size={16} className="mb-1" /> <span className="text-[9px] font-bold uppercase">Invert</span></button>
+                <div className="grid grid-cols-3 gap-2">
+                  <button onClick={() => setIsBgRemoved(!isBgRemoved)} className={`flex flex-col items-center justify-center py-2 border rounded-xl transition-all duration-100 ${isBgRemoved ? 'bg-black text-white border-black' : 'bg-white text-slate-500 border-slate-200'}`}><Icon path={Paths.Eraser} size={16} className="mb-1" /> <span className="text-[9px] font-bold uppercase">No BG</span></button>
+                  <button onClick={() => setIsInverted(!isInverted)} className={`flex flex-col items-center justify-center py-2 border rounded-xl transition-all duration-100 ${isInverted ? 'bg-black text-white border-black' : 'bg-white text-slate-500 border-slate-200'}`}><Icon path={Paths.Invert} size={16} className="mb-1" /> <span className="text-[9px] font-bold uppercase">Invert</span></button>
+                  <button onClick={() => { 
+                      const newMode = !isCropMode;
+                      setIsCropMode(newMode); 
+                      setIsEraserActive(false); 
+                      if (newMode && images.original) {
+                          const active = isBgRemoved ? (images.processed || images.original) : images.original;
+                          const bounds = detectContentBounds(active);
+                          setCropBox({ x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h });
+                      } else {
+                          setCropBox(null); 
+                      }
+                  }} className={`flex flex-col items-center justify-center py-2 border rounded-xl transition-all duration-100 ${isCropMode ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200'}`}><Icon path={Paths.Crop} size={16} className="mb-1" /> <span className="text-[9px] font-bold uppercase">Crop</span></button>
                 </div>
+                
+                {isCropMode && (
+                  <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-xl animate-in fade-in zoom-in-95">
+                     <span className="text-[10px] font-black uppercase text-blue-600 block mb-1">Crop Active</span>
+                     <p className="text-[10px] text-blue-500 mb-3 leading-tight">Click and drag on the canvas to draw your crop area.</p>
+                     <div className="flex gap-2">
+                       <button onClick={applyCrop} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[9px] font-bold uppercase tracking-widest active:scale-95 transition-all">Apply</button>
+                       <button onClick={() => { setIsCropMode(false); setCropBox(null); render(); }} className="flex-1 py-2 bg-white text-slate-500 hover:bg-slate-50 border border-slate-200 rounded-lg text-[9px] font-bold uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
+                     </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -548,12 +955,12 @@
                 <div className="flex flex-col gap-1.5">
                     <div className="flex h-10 border border-slate-200 rounded-xl bg-white overflow-hidden">
                        <button onClick={() => handleSnap('left')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Align Left"><Icon path={Paths.SnapLeft} size={14} /></button>
-                       <button onClick={() => handleSnap('center-h')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Center Horizontal"><Icon path={Paths.Minus} size={14} /></button>
+                       <button onClick={() => handleSnap('center-h')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Center Horizontal"><div className="w-px h-3.5 bg-current"></div></button>
                        <button onClick={() => handleSnap('right')} className="flex-1 flex items-center justify-center hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Align Right"><Icon path={Paths.SnapRight} size={14} /></button>
                     </div>
                     <div className="flex h-10 border border-slate-200 rounded-xl bg-white overflow-hidden">
                        <button onClick={() => handleSnap('up')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Align Top"><Icon path={Paths.SnapUp} size={14} /></button>
-                       <button onClick={() => handleSnap('center-v')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Center Vertical"><div className="w-px h-3.5 bg-current"></div></button>
+                       <button onClick={() => handleSnap('center-v')} className="flex-1 flex items-center justify-center border-r border-slate-200 hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Center Vertical"><Icon path={Paths.Minus} size={14} /></button>
                        <button onClick={() => handleSnap('down')} className="flex-1 flex items-center justify-center hover:bg-slate-50 active:bg-slate-100 transition-colors" title="Align Bottom"><Icon path={Paths.SnapDown} size={14} /></button>
                     </div>
                 </div>
@@ -562,12 +969,12 @@
               <div>
                 <div className="flex justify-between items-center mb-2">
                    <span className="text-[10px] font-black uppercase text-slate-400">Manual Eraser</span>
-                   <button onClick={() => setIsEraserActive(!isEraserActive)} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isEraserActive ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path={Paths.Eraser} size={14} /></button>
+                   <button onClick={() => { setIsEraserActive(!isEraserActive); setIsCropMode(false); setCropBox(null); }} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${isEraserActive ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-400'}`}><Icon path={Paths.Eraser} size={14} /></button>
                 </div>
                 {isEraserActive && (
                   <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
                     <div className="flex justify-between text-[8px] font-black uppercase text-slate-400"><span>Brush Size</span><span>{brushSize}px</span></div>
-                    <input type="range" min="10" max="150" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-red-500" />
+                    <input type="range" min="10" max="128" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-red-500" />
                   </div>
                 )}
               </div>
@@ -657,11 +1064,12 @@ if (descriptionContainer) {
 }
 
 // Re-formatting for clipboard fallback just in case
-const plainTextFallback = descriptionText.replace(/<br>/g, '\\n');
+const plainTextFallback = descriptionText.replace(/<br>/g, '\n');
 navigator.clipboard.writeText(plainTextFallback).catch(() => {});
 
 console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
 
+    // Simple hash function to prevent duplicate uploads
     const generateHash = (str) => {
       let hash = 0;
       for (let i = 0, len = str.length; i < len; i++) {
@@ -672,10 +1080,46 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
       return Math.abs(hash).toString(36);
     };
 
+    // ============================================================================
+    // NATIVE BROWSER DATABASE (No Firebase, 100% Free, Instant Saving)
+    // ============================================================================
+    const localDB = {
+      init: () => new Promise((resolve, reject) => {
+        const req = indexedDB.open('JeStudiosWorkspace', 1);
+        req.onupgradeneeded = e => e.target.result.createObjectStore('designs', { keyPath: 'id' });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      }),
+      save: async (data) => {
+        const db = await localDB.init();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('designs', 'readwrite');
+          tx.objectStore('designs').put(data);
+          tx.oncomplete = resolve; tx.onerror = reject;
+        });
+      },
+      getAll: async () => {
+        const db = await localDB.init();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('designs', 'readonly');
+          const req = tx.objectStore('designs').getAll();
+          req.onsuccess = () => resolve(req.result.sort((a,b) => b.createdAt - a.createdAt));
+          req.onerror = reject;
+        });
+      },
+      delete: async (id) => {
+        const db = await localDB.init();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('designs', 'readwrite');
+          tx.objectStore('designs').delete(id);
+          tx.oncomplete = resolve; tx.onerror = reject;
+        });
+      }
+    };
+
     function App() {
-      // Firebase State
+      // Firebase State (Kept only for Auth if needed elsewhere)
       const [user, setUser] = useState(null);
-      const [db, setDb] = useState(null);
       const [cloudDesigns, setCloudDesigns] = useState([]);
       const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
       const [saveStatus, setSaveStatus] = useState("");
@@ -713,34 +1157,26 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
       const VIEWS = ['front', 'back', 'detail'];
       const DOWNLOAD_VIEWS = ['front', 'back', 'detail', 'fabric', 'size'];
 
-      // Firebase Initialization
+      // Firebase Initialization (Stripped down to just basic auth)
       useEffect(() => {
         let unsubscribeAuth = () => {};
         const initFirebase = async () => {
           try {
             const { initializeApp } = await loadFirebase('firebase-app.js');
             const { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = await loadFirebase('firebase-auth.js');
-            const { getFirestore } = await loadFirebase('firebase-firestore.js');
 
             const app = initializeApp(PRODUCTION_FIREBASE_CONFIG);
             const auth = getAuth(app);
-            const dbInstance = getFirestore(app);
-            setDb(dbInstance);
 
             const initAuth = async () => {
               if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                try {
-                  await signInWithCustomToken(auth, __initial_auth_token);
-                } catch (e) {
-                  console.warn("Custom token sign-in failed. Falling back to anonymous auth.", e);
-                  await signInAnonymously(auth);
-                }
+                try { await signInWithCustomToken(auth, __initial_auth_token); } 
+                catch (e) { await signInAnonymously(auth); }
               } else {
                 await signInAnonymously(auth);
               }
             };
             await initAuth();
-
             unsubscribeAuth = onAuthStateChanged(auth, setUser);
           } catch (err) {
             console.error("Firebase init error:", err);
@@ -750,31 +1186,21 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         return () => unsubscribeAuth();
       }, []);
 
-      // Realtime Cloud Designs Listener (GLOBAL PATH FOR ALL DEVICES)
-      useEffect(() => {
-        if (!user || !db) return;
-        let unsubscribeSnapshot = null;
-        
-        const initSnapshot = async () => {
-          const { collection, onSnapshot } = await loadFirebase('firebase-firestore.js');
-          
-          // Using a simple root collection for your Firebase project
-          const designsRef = collection(db, 'global_designs');
-          
-          unsubscribeSnapshot = onSnapshot(designsRef, (snapshot) => {
-            const designs = [];
-            snapshot.forEach(doc => designs.push(doc.data()));
-            designs.sort((a, b) => b.createdAt - a.createdAt);
-            setCloudDesigns(designs);
-          }, (error) => {
-            console.error("Error listening to designs:", error);
-          });
-        };
-        initSnapshot();
-        
-        return () => { if (unsubscribeSnapshot) unsubscribeSnapshot(); };
-      }, [user, db]);
+      // Load Designs from Local Device Storage
+      const loadWorkspace = async () => {
+        try {
+          const designs = await localDB.getAll();
+          setCloudDesigns(designs);
+        } catch (error) {
+          console.error("Error loading local workspace:", error);
+        }
+      };
 
+      useEffect(() => {
+        loadWorkspace();
+      }, []);
+
+      // Autofocus for Pin URL input
       useEffect(() => {
         if (isPinModalOpen) {
           const timer = setTimeout(() => {
@@ -921,27 +1347,16 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
           await new Promise(r => setTimeout(r, 400));
         }
 
-        // --- 2. Save Print File to Cloud Backup (BACKGROUND) ---
-        if (uploadedImage && user && db) {
+        // --- 2. Save Print File to Local Workspace (BACKGROUND) ---
+        if (uploadedImage) {
           try {
             const imageHash = generateHash(uploadedImage);
             const designId = `design_${imageHash}`;
 
             if (!cloudDesigns.some(d => d.id === designId)) {
-              setSaveStatus("Backing up print file...");
-              const { doc, setDoc, collection } = await loadFirebase('firebase-firestore.js');
-              
-              // Using a simple root collection for your Firebase project
-              const designsRef = collection(db, 'global_designs');
-              const newDocRef = doc(designsRef, designId);
+              setSaveStatus("Saving to Workspace...");
 
-              // Chunk base64 string to bypass 1MB firestore limit (~800KB chunks)
-              const CHUNK_SIZE = 800000;
-              const chunks = [];
-              for (let i = 0; i < uploadedImage.length; i += CHUNK_SIZE) {
-                chunks.push(uploadedImage.slice(i, i + CHUNK_SIZE));
-              }
-
+              // Create a small thumbnail for the UI
               const thumbCanvas = document.createElement('canvas');
               thumbCanvas.width = 150;
               const img = new Image();
@@ -951,74 +1366,107 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
               tCtx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height);
               const thumbnail = thumbCanvas.toDataURL('image/png');
 
-              await setDoc(newDocRef, {
+              // Save massively huge files instantly to the local browser database
+              await localDB.save({
                 id: designId,
                 createdAt: Date.now(),
-                chunksCount: chunks.length,
                 thumbnail: thumbnail,
-                paperSize: paperSize
+                paperSize: paperSize,
+                fullImage: uploadedImage 
               });
-
-              for (let i = 0; i < chunks.length; i++) {
-                const chunkRef = doc(collection(newDocRef, 'chunks'), `chunk_${i}`);
-                await setDoc(chunkRef, { index: i, data: chunks[i] });
-              }
               
-              setSaveStatus("Saved to Cloud!");
+              await loadWorkspace(); // Refresh the list
+              setSaveStatus("Saved locally!");
               setTimeout(() => setSaveStatus(""), 3000);
             }
           } catch (error) {
-            console.error("Cloud save failed:", error);
-            setSaveStatus("Cloud backup failed");
+            console.error("Workspace save failed:", error);
+            setSaveStatus("Local backup failed");
             setTimeout(() => setSaveStatus(""), 3000);
           }
         }
       };
 
       const downloadCloudDesign = async (design) => {
-        if (!user || !db) return;
         setIsDownloadingCloud(true);
         try {
-           const { getDocs, collection } = await loadFirebase('firebase-firestore.js');
-           
-           // Using a simple root collection for your Firebase project
-           const chunksRef = collection(db, 'global_designs', design.id, 'chunks');
-           const snapshot = await getDocs(chunksRef);
-           
-           const chunks = [];
-           snapshot.forEach(doc => chunks.push(doc.data()));
-           chunks.sort((a, b) => a.index - b.index);
-           
-           const fullDataUrl = chunks.map(c => c.data).join('');
-           
            const link = document.createElement('a');
            link.download = `Print_File_${design.paperSize}_${design.id}.png`;
-           link.href = fullDataUrl;
+           // Pull the massive string straight out of the local database
+           link.href = design.fullImage;
            link.click();
         } catch (e) {
-           console.error("Cloud download failed", e);
-           alert("Failed to download image from cloud.");
+           console.error("Local download failed", e);
+           alert("Failed to download image from workspace.");
         } finally {
            setIsDownloadingCloud(false);
         }
       };
 
       const deleteCloudDesign = async (design) => {
-        if (!user || !db) return;
         try {
-            const { doc, deleteDoc, collection } = await loadFirebase('firebase-firestore.js');
-            
-            // Using a simple root collection for your Firebase project
-            const docRef = doc(db, 'global_designs', design.id);
-            
-            for(let i=0; i<design.chunksCount; i++) {
-                await deleteDoc(doc(collection(docRef, 'chunks'), `chunk_${i}`));
-            }
-            await deleteDoc(docRef);
+            await localDB.delete(design.id);
+            await loadWorkspace(); // Refresh list instantly
         } catch(e) { 
-            console.error(e); 
+            console.error("Failed to delete design", e); 
         }
       };
+
+      // --- ADDED: EXPORT / IMPORT BACKUP LOGIC ---
+      const exportWorkspace = async () => {
+        setSaveStatus("Preparing Backup...");
+        try {
+          const allDesigns = await localDB.getAll();
+          if (allDesigns.length === 0) {
+            setSaveStatus("Workspace is empty");
+            setTimeout(() => setSaveStatus(""), 3000);
+            return;
+          }
+          const dataStr = JSON.stringify(allDesigns);
+          const blob = new Blob([dataStr], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `JeStudios_Workspace_Backup_${new Date().toISOString().split('T')[0]}.json`;
+          link.click();
+          URL.revokeObjectURL(url);
+          setSaveStatus("Backup Downloaded!");
+          setTimeout(() => setSaveStatus(""), 3000);
+        } catch (error) {
+          console.error("Export failed:", error);
+          setSaveStatus("Export Failed");
+          setTimeout(() => setSaveStatus(""), 3000);
+        }
+      };
+
+      const importWorkspace = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setSaveStatus("Restoring Backup...");
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          try {
+            const importedData = JSON.parse(ev.target.result);
+            if (!Array.isArray(importedData)) throw new Error("Invalid format");
+            
+            for (const design of importedData) {
+              if (design.id && design.fullImage) {
+                await localDB.save(design);
+              }
+            }
+            await loadWorkspace();
+            setSaveStatus("Workspace Restored!");
+            setTimeout(() => setSaveStatus(""), 3000);
+          } catch (error) {
+            console.error("Import failed:", error);
+            setSaveStatus("Invalid Backup File");
+            setTimeout(() => setSaveStatus(""), 3000);
+          }
+        };
+        reader.readAsText(file);
+        e.target.value = ''; // Reset input
+      };
+      // -------------------------------------------
 
       const handleCopyScript = () => {
         const textArea = document.createElement("textarea");
@@ -1228,6 +1676,24 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
              {/* Cloud Designs Modal overlaying the canvas */}
              {isCloudModalOpen && (
                <div className="absolute inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-bottom-8 fade-in duration-200 overflow-hidden">
+                   
+                   {/* Workspace Header with Backup Controls */}
+                   <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-white shrink-0">
+                     <div>
+                       <h2 className="font-roboto-bold text-lg text-slate-800">Local Workspace</h2>
+                       <p className="text-xs text-slate-500 font-medium mt-0.5">Stored securely on this device</p>
+                     </div>
+                     <div className="flex items-center gap-2">
+                       <label className="cursor-pointer px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5">
+                         <Icon path={Paths.Upload} size={14} /> Import
+                         <input type="file" accept=".json" className="hidden" onChange={importWorkspace} />
+                       </label>
+                       <button onClick={exportWorkspace} className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5">
+                         <Icon path={Paths.Download} size={14} /> Backup
+                       </button>
+                     </div>
+                   </div>
+
                    <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50 relative">
                      {isDownloadingCloud && (
                        <div className="absolute inset-0 z-20 bg-white/90 flex flex-col items-center justify-center">
@@ -1236,17 +1702,11 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
                        </div>
                      )}
 
-                     {!user ? (
-                       <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                         <Icon path={Paths.Cloud} size={48} className="mb-4 opacity-50" />
-                         <p className="text-sm font-medium">Cloud features are currently unavailable.</p>
-                         <p className="text-xs mt-1">Verify your Firebase config if running on GitHub.</p>
-                       </div>
-                     ) : cloudDesigns.length === 0 ? (
+                     {cloudDesigns.length === 0 ? (
                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
                          <Icon path={Paths.Upload} size={48} className="mb-4 opacity-50" />
-                         <p className="text-sm font-medium">No saved designs yet.</p>
-                         <p className="text-xs mt-1">Export a mockup to backup your artwork automatically.</p>
+                         <p className="text-sm font-medium">Your Workspace is empty.</p>
+                         <p className="text-xs mt-1">Export a mockup to backup your print files automatically.</p>
                        </div>
                      ) : (
                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
@@ -1321,7 +1781,7 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
                   <span className="text-[11px] font-black uppercase tracking-widest text-slate-800 hidden sm:inline">Edit Design</span>
                 </button>
                 <div className="h-6 w-px bg-slate-200 shrink-0 mx-1"></div>
-                <button onClick={() => setIsCloudModalOpen(!isCloudModalOpen)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 ${isCloudModalOpen ? 'border-red-200 bg-red-50 text-red-600' : 'border-blue-200 bg-blue-50 text-blue-600'}`} title={isCloudModalOpen ? "Close Cloud Backup" : "Cloud Backup"}>
+                <button onClick={() => setIsCloudModalOpen(!isCloudModalOpen)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 ${isCloudModalOpen ? 'border-red-200 bg-red-50 text-red-600' : 'border-blue-200 bg-blue-50 text-blue-600'}`} title={isCloudModalOpen ? "Close Workspace" : "Open Workspace"}>
                   <Icon path={isCloudModalOpen ? Paths.Close : Paths.Cloud} size={16} />
                 </button>
                 <button onClick={handleCopyScript} className="flex-1 min-w-[40px] h-10 border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0" title="Copy Description Script">
