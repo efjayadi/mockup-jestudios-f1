@@ -1124,6 +1124,7 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
       const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
       const [saveStatus, setSaveStatus] = useState("");
       const [isDownloadingCloud, setIsDownloadingCloud] = useState(false);
+      const [fullscreenImage, setFullscreenImage] = useState(null);
 
       // App State
       const [garmentColor, setGarmentColor] = useState('black');
@@ -1489,7 +1490,26 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         textArea.remove();
       };
 
-      const handleDragEvent = (type, e) => { e.preventDefault(); if (type === 'enter') dragCounter.current++; else if (type === 'leave') dragCounter.current--; else if (type === 'drop') { dragCounter.current = 0; setIsDragOver(false); if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]); return; } setIsDragOver(dragCounter.current > 0); };
+      const handleDragEvent = (type, e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        if (type === 'enter') {
+          dragCounter.current++;
+          setIsDragOver(true);
+        } else if (type === 'leave') {
+          dragCounter.current--;
+          if (dragCounter.current === 0) setIsDragOver(false);
+        } else if (type === 'drop') {
+          dragCounter.current = 0;
+          setIsDragOver(false);
+          if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const file = e.dataTransfer.files[0];
+            // Ensure we are passing the explicit file reference to processFile
+            processFile(file);
+          }
+        }
+      };
 
       const handleUrlSubmit = async (e) => {
         e.preventDefault();
@@ -1677,21 +1697,19 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
              {isCloudModalOpen && (
                <div className="absolute inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-bottom-8 fade-in duration-200 overflow-hidden">
                    
-                   {/* Workspace Header with Backup Controls */}
-                   <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-white shrink-0">
-                     <div>
-                       <h2 className="font-roboto-bold text-lg text-slate-800">Local Workspace</h2>
-                       <p className="text-xs text-slate-500 font-medium mt-0.5">Stored securely on this device</p>
-                     </div>
-                     <div className="flex items-center gap-2">
-                       <label className="cursor-pointer px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5">
-                         <Icon path={Paths.Upload} size={14} /> Import
-                         <input type="file" accept=".json" className="hidden" onChange={importWorkspace} />
-                       </label>
-                       <button onClick={exportWorkspace} className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5">
-                         <Icon path={Paths.Download} size={14} /> Backup
-                       </button>
-                     </div>
+                   {/* Workspace Header with Icons Only */}
+                   <div className="flex items-center justify-end gap-2 p-3 border-b border-slate-100 bg-white shrink-0">
+                     <label className="cursor-pointer p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full transition-colors" title="Import Workspace">
+                       <Icon path={Paths.Upload} size={16} />
+                       <input type="file" accept=".json" className="hidden" onChange={importWorkspace} />
+                     </label>
+                     <button onClick={exportWorkspace} className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full transition-colors" title="Backup Workspace">
+                       <Icon path={Paths.Download} size={16} />
+                     </button>
+                     <div className="w-px h-5 bg-slate-200 mx-1"></div>
+                     <button onClick={() => setIsCloudModalOpen(false)} className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full transition-colors" title="Close Workspace">
+                       <Icon path={Paths.Close} size={18} />
+                     </button>
                    </div>
 
                    <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50 relative">
@@ -1711,31 +1729,90 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
                      ) : (
                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
                          {cloudDesigns.map(design => (
-                           <div key={design.id} className="bg-white border rounded-2xl p-3 flex flex-col group hover:shadow-md transition-shadow">
+                           <div key={design.id} onClick={() => setFullscreenImage(design.fullImage)} className="bg-white border rounded-2xl p-3 flex flex-col group hover:shadow-lg transition-all cursor-pointer hover:-translate-y-1">
                              <div className="aspect-[3/4] bg-slate-100 rounded-xl mb-3 overflow-hidden relative flex items-center justify-center">
                                <img src={design.thumbnail} className="max-w-[80%] max-h-[80%] object-contain" />
                                <div className="absolute top-2 right-2 bg-black/60 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase">
                                  {design.paperSize || "A4"}
                                </div>
                              </div>
-                             <div className="flex justify-between items-center mt-auto">
-                               <span className="text-xs text-slate-500 font-medium">
+                             <div className="flex justify-center items-center mt-auto">
+                               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                                  {new Date(design.createdAt).toLocaleDateString()}
                                </span>
-                               <div className="flex gap-1">
-                                 <button onClick={() => deleteCloudDesign(design)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                                   <Icon path={Paths.Trash} size={14} />
-                                 </button>
-                                 <button onClick={() => downloadCloudDesign(design)} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-lg transition-colors">
-                                   <Icon path={Paths.Download} size={14} />
-                                 </button>
-                               </div>
                              </div>
                            </div>
                          ))}
                        </div>
                      )}
                    </div>
+                   
+                   {/* Fullscreen Viewer Lightbox */}
+                   {fullscreenImage && (
+                     <div className="absolute inset-0 z-[100] bg-black/95 flex flex-col animate-in fade-in duration-200">
+                       <div className="flex justify-end p-4 absolute top-0 right-0 z-10 w-full pointer-events-none">
+                         <button onClick={() => setFullscreenImage(null)} className="p-3 bg-white/10 hover:bg-white/20 rounded-full text-white pointer-events-auto transition-colors">
+                           <Icon path={Paths.Close} size={20} />
+                         </button>
+                       </div>
+                       <div className="flex-1 overflow-hidden flex items-center justify-center relative touch-none">
+                          <img 
+                            src={fullscreenImage} 
+                            className="max-w-full max-h-full object-contain cursor-grab active:cursor-grabbing transition-transform duration-75"
+                            ref={(el) => {
+                              if (!el) return;
+                              let scale = 1;
+                              let panX = 0;
+                              let panY = 0;
+                              let isDown = false;
+                              let startX = 0;
+                              let startY = 0;
+                              
+                              const apply = () => { el.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`; };
+                              
+                              el.onwheel = (e) => {
+                                e.preventDefault();
+                                const delta = e.deltaY * -0.005;
+                                scale = Math.min(Math.max(0.5, scale + delta), 5);
+                                apply();
+                              };
+                              
+                              el.onmousedown = (e) => {
+                                isDown = true;
+                                startX = e.clientX - panX;
+                                startY = e.clientY - panY;
+                              };
+                              
+                              window.onmousemove = (e) => {
+                                if (!isDown) return;
+                                panX = e.clientX - startX;
+                                panY = e.clientY - startY;
+                                apply();
+                              };
+                              
+                              window.onmouseup = () => { isDown = false; };
+                              
+                              el.ontouchstart = (e) => {
+                                if (e.touches.length === 1) {
+                                   isDown = true;
+                                   startX = e.touches[0].clientX - panX;
+                                   startY = e.touches[0].clientY - panY;
+                                }
+                              };
+                              
+                              window.ontouchmove = (e) => {
+                                if (!isDown || e.touches.length !== 1) return;
+                                panX = e.touches[0].clientX - startX;
+                                panY = e.touches[0].clientY - startY;
+                                apply();
+                              };
+                              
+                              window.ontouchend = () => { isDown = false; };
+                            }}
+                          />
+                       </div>
+                     </div>
+                   )}
                </div>
              )}
 
@@ -1766,31 +1843,43 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
              </div>
           </div>
 
-          <div className="w-full bg-white border-t border-slate-200 z-40 shrink-0">
+          <div className="w-full bg-white border-t border-slate-200 z-40 shrink-0 transition-all duration-200">
             <div className="flex flex-col gap-3 p-3 w-full max-w-screen-2xl mx-auto">
-              <div className="flex items-center gap-3 w-full">
-                <div className="flex gap-2 shrink-0 border-r pr-3 border-slate-100">{['black', 'white'].map(c => (<button key={c} onClick={() => setGarmentColor(c)} className={`w-8 h-8 rounded-full border-2 transition-transform duration-100 ${c === 'black' ? 'bg-black' : 'bg-[#f8fafc]'} ${garmentColor === c ? 'border-black scale-110' : 'border-slate-100'}`} />))}</div>
-                <div className="flex-1 overflow-x-auto hide-scrollbar flex gap-2 py-1">
-                   <button onClick={() => setSelectedDriver(null)} className={`relative w-9 h-9 rounded-full shrink-0 flex items-center justify-center transition-all duration-100 border ${selectedDriver === null ? 'border-black scale-110 z-10 bg-slate-100' : 'opacity-70 border-slate-200 bg-white'}`} title="No Driver"><Icon path={Paths.Block} size={18} className="text-slate-400" /></button>
-                   {DRIVERS.map(d => (<button key={d.id} onClick={() => setSelectedDriver(d.id)} className={`relative w-9 h-9 rounded-full shrink-0 transition-all duration-100 overflow-hidden border ${selectedDriver === d.id ? 'border-black scale-110 z-10' : 'opacity-70 border-slate-200'}`}><div className={`absolute inset-0 ${d.color}`} /><img src={d.image} className="absolute top-[10%] w-[40px] left-1/2 -translate-x-1/2" onError={(e) => { e.target.style.display='none'; }}/></button>))}
+              {!isCloudModalOpen && (
+                <div className="flex items-center gap-3 w-full animate-in fade-in zoom-in-95 duration-200">
+                  <div className="flex gap-2 shrink-0 border-r pr-3 border-slate-100">{['black', 'white'].map(c => (<button key={c} onClick={() => setGarmentColor(c)} className={`w-8 h-8 rounded-full border-2 transition-transform duration-100 ${c === 'black' ? 'bg-black' : 'bg-[#f8fafc]'} ${garmentColor === c ? 'border-black scale-110' : 'border-slate-100'}`} />))}</div>
+                  <div className="flex-1 overflow-x-auto hide-scrollbar flex gap-2 py-1">
+                     <button onClick={() => setSelectedDriver(null)} className={`relative w-9 h-9 rounded-full shrink-0 flex items-center justify-center transition-all duration-100 border ${selectedDriver === null ? 'border-black scale-110 z-10 bg-slate-100' : 'opacity-70 border-slate-200 bg-white'}`} title="No Driver"><Icon path={Paths.Block} size={18} className="text-slate-400" /></button>
+                     {DRIVERS.map(d => (<button key={d.id} onClick={() => setSelectedDriver(d.id)} className={`relative w-9 h-9 rounded-full shrink-0 transition-all duration-100 overflow-hidden border ${selectedDriver === d.id ? 'border-black scale-110 z-10' : 'opacity-70 border-slate-200'}`}><div className={`absolute inset-0 ${d.color}`} /><img src={d.image} className="absolute top-[10%] w-[40px] left-1/2 -translate-x-1/2" onError={(e) => { e.target.style.display='none'; }}/></button>))}
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="flex items-center gap-2 w-full overflow-x-auto hide-scrollbar">
-                <button onClick={() => setIsStudioOpen(true)} className="flex-[2] min-w-[80px] h-10 border rounded-xl bg-white flex items-center justify-center duration-100 shrink-0 gap-2" title="Edit Design">
-                  <Icon path={Paths.Edit} size={16} />
-                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-800 hidden sm:inline">Edit Design</span>
-                </button>
-                <div className="h-6 w-px bg-slate-200 shrink-0 mx-1"></div>
-                <button onClick={() => setIsCloudModalOpen(!isCloudModalOpen)} className={`flex-1 min-w-[40px] h-10 border rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 ${isCloudModalOpen ? 'border-red-200 bg-red-50 text-red-600' : 'border-blue-200 bg-blue-50 text-blue-600'}`} title={isCloudModalOpen ? "Close Workspace" : "Open Workspace"}>
+                {!isCloudModalOpen && (
+                  <>
+                    <button onClick={() => setIsStudioOpen(true)} className="flex-[2] min-w-[80px] h-10 border rounded-xl bg-white flex items-center justify-center duration-100 shrink-0 gap-2 animate-in fade-in slide-in-from-left-4" title="Edit Design">
+                      <Icon path={Paths.Edit} size={16} />
+                      <span className="text-[11px] font-black uppercase tracking-widest text-slate-800 hidden sm:inline">Edit Design</span>
+                    </button>
+                    <div className="h-6 w-px bg-slate-200 shrink-0 mx-1 animate-in fade-in"></div>
+                  </>
+                )}
+                
+                <button onClick={() => setIsCloudModalOpen(!isCloudModalOpen)} className={`min-w-[40px] h-10 border rounded-xl flex items-center justify-center active:scale-95 transition-all duration-300 shrink-0 ${isCloudModalOpen ? 'flex-1 border-red-200 bg-red-50 text-red-600' : 'flex-1 border-blue-200 bg-blue-50 text-blue-600'}`} title={isCloudModalOpen ? "Close Workspace" : "Open Workspace"}>
                   <Icon path={isCloudModalOpen ? Paths.Close : Paths.Cloud} size={16} />
                 </button>
-                <button onClick={handleCopyScript} className="flex-1 min-w-[40px] h-10 border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0" title="Copy Description Script">
-                  <span className="font-black font-roboto-bold text-[15px]">S</span>
-                </button>
-                <button onClick={downloadMockup} className="flex-[2] min-w-[80px] h-10 bg-black text-white rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 gap-2" title="Download">
-                  <Icon path={Paths.Download} size={16} />
-                  <span className="text-[11px] font-black uppercase tracking-widest text-white hidden sm:inline">Export</span>
-                </button>
+
+                {!isCloudModalOpen && (
+                  <>
+                    <button onClick={handleCopyScript} className="flex-1 min-w-[40px] h-10 border border-slate-200 bg-white text-slate-800 hover:bg-slate-50 rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 animate-in fade-in slide-in-from-right-4" title="Copy Description Script">
+                      <span className="font-black font-roboto-bold text-[15px]">S</span>
+                    </button>
+                    <button onClick={downloadMockup} className="flex-[2] min-w-[80px] h-10 bg-black text-white rounded-xl flex items-center justify-center active:scale-95 duration-100 shrink-0 gap-2 animate-in fade-in slide-in-from-right-8" title="Download">
+                      <Icon path={Paths.Download} size={16} />
+                      <span className="text-[11px] font-black uppercase tracking-widest text-white hidden sm:inline">Export</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
