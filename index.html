@@ -1511,13 +1511,12 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         }
       };
 
-      const handleUrlSubmit = async (e) => {
-        e.preventDefault();
-        if (!pinUrl.trim()) return;
+      const fetchImageFromUrl = async (targetUrl) => {
         setIsFetchingPin(true);
         setPinError("");
+        setShowUploadMenu(false);
         try {
-          let targetImgUrl = pinUrl.trim();
+          let targetImgUrl = targetUrl;
           
           if (targetImgUrl.includes('pinterest.') || targetImgUrl.includes('pin.it')) {
             let html = "";
@@ -1575,10 +1574,53 @@ console.log("🚀 Selesai! 21 Harga, Stok, dan Deskripsi sudah diupdate.");`;
         } catch (err) {
           console.error(err);
           setPinError(err.message || "Failed to load image. Check the URL and try again.");
+          setIsPinModalOpen(true);
         } finally {
           setIsFetchingPin(false);
         }
       };
+
+      const handleUrlSubmit = async (e) => {
+        e.preventDefault();
+        if (!pinUrl.trim()) return;
+        await fetchImageFromUrl(pinUrl.trim());
+      };
+
+      const pasteHandlerRef = useRef(null);
+      pasteHandlerRef.current = (e) => {
+        // Prevent intercepting if the user is typing in an input or textarea
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+        
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        let imageFound = false;
+        for (const item of items) {
+          if (item.type.indexOf("image") === 0) {
+            const file = item.getAsFile();
+            if (file) {
+              processFile(file);
+              imageFound = true;
+              e.preventDefault();
+              break;
+            }
+          }
+        }
+
+        if (!imageFound) {
+          const text = e.clipboardData.getData("text");
+          if (text && (text.includes('http://') || text.includes('https://'))) {
+            e.preventDefault();
+            fetchImageFromUrl(text.trim());
+          }
+        }
+      };
+
+      useEffect(() => {
+        const handler = (e) => pasteHandlerRef.current && pasteHandlerRef.current(e);
+        window.addEventListener('paste', handler);
+        return () => window.removeEventListener('paste', handler);
+      }, []);
 
       const renderView = (type) => {
         let src = `garment/garment-${garmentColor}.png`; let pos = { l: (CANVAS_SIZE-PRINT_WIDTH_1)/2, t: PRINT_TOP_1, w: PRINT_WIDTH_1 };
